@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI Coach - PhysioVR</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            margin: 0;
+            /* CONSISTENT GRADIENT (Matches About Page) */
+            background: #0f172a; 
+            background-image: radial-gradient(circle at 50% 50%, #1e293b 0%, #0f172a 100%);
+            color: white;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden; 
+        }
+
+        /* --- MOBILE-FIRST NAVBAR (CONSISTENT) --- */
+        .navbar { 
+            padding: 15px 25px; 
+            display: flex; 
+            justify-content: flex-end; 
+            align-items: center;
+            position: sticky; 
+            top: 0; 
+            z-index: 100;
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .nav-toggle { display: none; }
+
+        .nav-toggle-label {
+            cursor: pointer;
+            display: block;
+            z-index: 110;
+        }
+
+        .nav-toggle-label span,
+        .nav-toggle-label span::before,
+        .nav-toggle-label span::after {
+            display: block;
+            background: #00d2ff;
+            height: 3px;
+            width: 28px;
+            border-radius: 2px;
+            position: relative;
+            transition: 0.3s;
+        }
+
+        .nav-toggle-label span::before { content: ""; position: absolute; bottom: 10px; }
+        .nav-toggle-label span::after { content: ""; position: absolute; top: 10px; }
+
+        .nav-links { 
+            position: fixed;
+            top: 0;
+            right: -100%;
+            width: 100%;
+            height: 100vh;
+            background: rgba(10, 10, 10, 0.98);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 40px;
+            transition: 0.5s cubic-bezier(0.77,0.2,0.05,1.0);
+            z-index: 105;
+        }
+
+        .nav-item { 
+            color: #ddd; 
+            text-decoration: none; 
+            font-weight: 600; 
+            font-size: 28px; 
+            transition: 0.3s; 
+        }
+
+        #nav-toggle:checked ~ .nav-links { right: 0; }
+        #nav-toggle:checked ~ .nav-toggle-label span { background: transparent; }
+        #nav-toggle:checked ~ .nav-toggle-label span::before { transform: rotate(45deg); top: 0; }
+        #nav-toggle:checked ~ .nav-toggle-label span::after { transform: rotate(-45deg); top: 0; }
+
+        /* --- CHAT CONTAINER (Glassmorphism Style) --- */
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            width: 95%;
+            max-width: 800px;
+            margin: 15px auto;
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+
+        #messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .msg {
+            padding: 12px 18px;
+            border-radius: 18px;
+            max-width: 85%;
+            font-size: 15px;
+            line-height: 1.4;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .ai { background: rgba(51, 65, 85, 0.8); align-self: flex-start; border-bottom-left-radius: 4px; border: 1px solid rgba(255,255,255,0.1); }
+        .user { background: linear-gradient(135deg, #007bff, #00d2ff); align-self: flex-end; border-bottom-right-radius: 4px; }
+
+        .input-area {
+            padding: 15px;
+            background: rgba(15, 23, 42, 0.9);
+            border-top: 1px solid rgba(255,255,255,0.1);
+            display: flex;
+            gap: 10px;
+        }
+
+        #chat-input {
+            flex: 1;
+            padding: 12px 20px;
+            border-radius: 25px;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(30, 41, 59, 0.5);
+            color: white;
+            outline: none;
+        }
+
+        .send-btn {
+            width: 45px; height: 45px;
+            border-radius: 50%;
+            background: #00d2ff;
+            color: #0f172a;
+            border: none;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+        }
+
+        /* --- DESKTOP ADAPTATIONS --- */
+        @media (min-width: 768px) {
+            .nav-toggle-label { display: none; }
+            .navbar { justify-content: center; padding: 25px; }
+            .nav-links {
+                position: static;
+                width: auto; height: auto;
+                background: none;
+                flex-direction: row;
+                gap: 50px;
+            }
+            .nav-item { font-size: 18px; }
+            .chat-container { margin: 30px auto; }
+        }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+
+    <nav class="navbar">
+        <input type="checkbox" id="nav-toggle" class="nav-toggle">
+        <label for="nav-toggle" class="nav-toggle-label">
+            <span></span>
+        </label>
+
+        <div class="nav-links">
+            <a href="/" class="nav-item">Home</a>
+            <a href="/coach" class="nav-item" style="color:#00d2ff">AI Coach</a>
+            <a href="/about" class="nav-item">About</a>
+        </div>
+    </nav>
+
+    <div class="chat-container">
+        <div id="messages">
+            <div class="msg ai">
+                Hi! I'm your dedicated Fitness Assistant. 🤖<br><br>
+                How can I help you with your recovery today?
+            </div>
+        </div>
+        
+        <div class="input-area">
+            <input type="text" id="chat-input" placeholder="Ask me anything..." onkeypress="handleEnter(event)">
+            <button class="send-btn" onclick="sendChat()">➤</button>
+        </div>
+    </div>
+
+    <script>
+        var socket = io();
+
+        function sendChat() {
+            var input = document.getElementById('chat-input');
+            var text = input.value.trim();
+            if(!text) return;
+            
+            var messagesDiv = document.getElementById('messages');
+            messagesDiv.innerHTML += `<div class="msg user">${text}</div>`;
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+            socket.emit('send_chat', {message: text});
+            input.value = '';
+        }
+
+        function handleEnter(e) {
+            if (e.key === 'Enter') sendChat();
+        }
+
+        socket.on('receive_chat', function(data) {
+            var messagesDiv = document.getElementById('messages');
+            messagesDiv.innerHTML += `<div class="msg ai">${data.text}</div>`;
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        });
+    </script>
+</body>
+</html>

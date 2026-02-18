@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>VR Session - PhysioVR</title>
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-extras@7.4.0/dist/aframe-extras.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+
+        /* --- MOBILE-FIRST SESSION OVERLAY --- */
+        .session-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 1000;
+            pointer-events: none; /* Allows clicking through to VR scene */
+        }
+
+        .exit-btn {
+            pointer-events: auto; /* Re-enable clicking for the button */
+            background: rgba(255, 50, 50, 0.8);
+            color: white;
+            text-decoration: none;
+            padding: 8px 20px;
+            border-radius: 50px;
+            font-weight: bold;
+            font-size: 14px;
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255,255,255,0.2);
+            transition: 0.3s;
+        }
+
+        .exit-btn:hover { background: #ff3232; transform: scale(1.05); }
+
+        .session-info {
+            color: #00d2ff;
+            font-weight: bold;
+            text-shadow: 0 0 10px rgba(0,0,0,0.8);
+            font-size: 14px;
+        }
+
+        /* Adjustments for Desktop */
+        @media (min-width: 768px) {
+            .exit-btn { font-size: 16px; padding: 10px 25px; }
+            .session-info { font-size: 18px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="session-overlay">
+        <div class="session-info" id="timer-display">00:00</div>
+        <a href="/" class="exit-btn">EXIT SESSION</a>
+    </div>
+
+    <a-scene xr-mode-ui="enabled: true; enterARButton: false">
+        
+        <a-assets>
+            <audio id="snd-good" src="/static/good.mp3"></audio>
+            <img id="gym-texture" src="/static/gym.png">
+            <img id="park-texture" src="https://live.staticflickr.com/65535/49931679483_70208b688d_b.jpg">
+            <a-asset-item id="avatar-model" src="/static/pushup_avatar.glb"></a-asset-item>
+        </a-assets>
+
+        {% if env == 'park' %}
+            <a-sky src="#park-texture" rotation="0 -90 0"></a-sky>
+        {% else %}
+            <a-sky src="#gym-texture" rotation="0 -90 0"></a-sky>
+        {% endif %}
+
+        <a-light type="ambient" color="#FFF" intensity="0.8"></a-light>
+        <a-light type="directional" position="-1 1 0"></a-light>
+
+        <a-entity id="rig" position="0 0.5 2"> 
+            <a-entity camera look-controls position="0 0 0">
+                 <a-text id="score-text" value="Reps: 0" position="-0.4 0.4 -1" color="white" width="1.8" font="exo2bold"></a-text>
+                 <a-text id="status-text" value="Get Ready" position="0.1 0.4 -1" color="#00d2ff" width="1.8" font="exo2bold"></a-text>
+            </a-entity>
+        </a-entity>
+
+        <a-entity 
+            gltf-model="#avatar-model" 
+            position="1 0 0" 
+            rotation="0 -45 0" 
+            scale="1 1 1"
+            animation-mixer="clip: *; loop: repeat; timeScale: 1">
+        </a-entity>
+
+        <a-text value="AI TRAINER" position="1 1.4 0" color="#00FFFF" align="center" width="3" font="exo2bold"></a-text>
+
+    </a-scene>
+
+    <script>
+        var socket = io();
+        var scoreText = document.querySelector('#score-text');
+        var statusText = document.querySelector('#status-text');
+        var timerDisplay = document.getElementById('timer-display');
+
+        // --- UPDATED: TIMER LOGIC ---
+        var elapsed = 0;
+        setInterval(function() {
+            elapsed++;
+            var minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
+            var seconds = (elapsed % 60).toString().padStart(2, '0');
+            timerDisplay.innerText = minutes + ":" + seconds;
+        }, 1000);
+
+        // --- FEEDBACK LOGIC ---
+        const urlParams = new URLSearchParams(window.location.search);
+        const exerciseType = urlParams.get('ex') || 'pushup';
+
+        const feedbackMessages = {
+            'cardio': ["Keep your pace!", "Breathe!", "Push it!"],
+            'yoga': ["Focus on breathing.", "Hold the pose.", "Find your center."],
+            'pushup': ["Keep back straight!", "Lower chest to floor!", "Great form!"],
+            'squat': ["Knees out!", "Chest up!", "Drive through heels!"]
+        };
+
+        // Every 10 seconds, provide feedback
+        setInterval(function() {
+            var msgs = feedbackMessages[exerciseType] || feedbackMessages['pushup'];
+            var randomMsg = msgs[Math.floor(Math.random() * msgs.length)];
+            
+            statusText.setAttribute('value', randomMsg);
+            
+            var utterance = new SpeechSynthesisUtterance(randomMsg);
+            speechSynthesis.speak(utterance);
+        }, 10000);
+
+        // --- SOCKET UPDATES ---
+        socket.on('update_vr', function(data) {
+            if(data.reps !== undefined) {
+                scoreText.setAttribute('value', "Reps: " + data.reps);
+            }
+            if(data.status === "Push Now!" || data.status === "Up!") {
+                statusText.setAttribute('value', data.status);
+            }
+        });
+    </script>
+</body>
+</html>
