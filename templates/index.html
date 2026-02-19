@@ -60,27 +60,75 @@
         <div class="session-info" id="timer-display">00:00</div>
         <a href="/" class="exit-btn">EXIT SESSION</a>
     </div>
+    
+    <script>
+        async function enableVR(){
+            if (typeof DeviceOrientationEvent !== "undefined" &&
+                typeof DeviceOrientationEvent.requestPermission === "function") {
+                await DeviceOrientationEvent.requestPermission();
+            }
 
-    <a-scene xr-mode-ui="enabled: true; enterARButton: false">
+            const video = document.querySelector("#temple");
+            await video.play();
+
+            document.querySelector("a-scene").enterVR();
+        }
+    </script>
+
+
+
+    <!-- this is btn for on/off of vr -->
+    <button id="vrbtn" onclick="enableVR()"
+        style="
+        position:fixed;
+        bottom:20px;
+        left:50%;
+        transform:translateX(-50%);
+        z-index:9999;
+        background:#00d2ff;
+        color:black;
+        padding:14px 22px;
+        border-radius:30px;
+        border:none;
+        font-weight:bold;
+        font-size:16px;
+        box-shadow:0 0 15px rgba(0,210,255,.6);
+        ">
+        ENTER VR MODE
+    </button>
+
+
+    <a-scene vr-mode-ui="enabled: true" xr-mode-ui="enabled: true" device-orientation-permission-ui="enabled: false" renderer="antialias: true; colorManagement: true;">
         
+
         <a-assets>
             <audio id="snd-good" src="/static/good.mp3"></audio>
-            <img id="gym-texture" src="/static/gym.png">
+            <video id="temple"
+            src="/static/cave.mp4"
+            preload="metadata"
+            muted
+            loop
+            playsinline
+            webkit-playsinline
+            crossorigin="anonymous">
+        </video>
+
             <img id="park-texture" src="https://live.staticflickr.com/65535/49931679483_70208b688d_b.jpg">
             <a-asset-item id="avatar-model" src="/static/pushup_avatar.glb"></a-asset-item>
         </a-assets>
 
-        {% if env == 'park' %}
-            <a-sky src="#park-texture" rotation="0 -90 0"></a-sky>
-        {% else %}
-            <a-sky src="#gym-texture" rotation="0 -90 0"></a-sky>
-        {% endif %}
+        <a-videosphere 
+            src="#temple"
+            rotation="0 180 0"
+            material="shader: flat; side: back"
+            stereo="eye: mono">
+        </a-videosphere>
 
         <a-light type="ambient" color="#FFF" intensity="0.8"></a-light>
         <a-light type="directional" position="-1 1 0"></a-light>
 
-        <a-entity id="rig" position="0 0.5 2"> 
-            <a-entity camera look-controls position="0 0 0">
+        <a-entity id="rig" position="0 1.6 0"> 
+            <a-entity id="head" camera="fov: 90" look-controls="magicWindowTrackingEnabled: false; touchEnabled: true">
                  <a-text id="score-text" value="Reps: 0" position="-0.4 0.4 -1" color="white" width="1.8" font="exo2bold"></a-text>
                  <a-text id="status-text" value="Get Ready" position="0.1 0.4 -1" color="#00d2ff" width="1.8" font="exo2bold"></a-text>
             </a-entity>
@@ -145,5 +193,19 @@
             }
         });
     </script>
+
+    <script>
+        document.querySelector('a-scene').addEventListener('loaded', async () => {
+            const video = document.querySelector('#temple');
+
+            // wait for user gesture once
+            document.body.addEventListener('click', async () => {
+                video.muted = true;
+                await video.play();
+            }, { once: true });
+        });
+    </script>
+
+
 </body>
 </html>
