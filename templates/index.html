@@ -21,11 +21,11 @@
             justify-content: space-between;
             align-items: center;
             z-index: 1000;
-            pointer-events: none; /* Allows clicking through to VR scene */
+            pointer-events: none;
         }
 
         .exit-btn {
-            pointer-events: auto; /* Re-enable clicking for the button */
+            pointer-events: auto;
             background: rgba(255, 50, 50, 0.8);
             color: white;
             text-decoration: none;
@@ -47,7 +47,6 @@
             font-size: 14px;
         }
 
-        /* Adjustments for Desktop */
         @media (min-width: 768px) {
             .exit-btn { font-size: 16px; padding: 10px 25px; }
             .session-info { font-size: 18px; }
@@ -68,16 +67,16 @@
                 await DeviceOrientationEvent.requestPermission();
             }
 
-            const video = document.querySelector("#temple");
-            await video.play();
+            const media = document.querySelector("#bg-media");
+            // If the environment is a video, we need to play it. Images don't play.
+            if (media && media.tagName.toLowerCase() === 'video') {
+                await media.play();
+            }
 
             document.querySelector("a-scene").enterVR();
         }
     </script>
 
-
-
-    <!-- this is btn for on/off of vr -->
     <button id="vrbtn" onclick="enableVR()"
         style="
         position:fixed;
@@ -97,32 +96,38 @@
         ENTER VR MODE
     </button>
 
-
     <a-scene vr-mode-ui="enabled: true" xr-mode-ui="enabled: true" device-orientation-permission-ui="enabled: false" renderer="antialias: true; colorManagement: true;">
         
-
         <a-assets>
             <audio id="snd-good" src="/static/good.mp3"></audio>
-            <video id="temple"
-            src="/static/cave.mp4"
-            preload="metadata"
-            muted
-            loop
-            playsinline
-            webkit-playsinline
-            crossorigin="anonymous">
-        </video>
+            
+            <a-asset-item id="avatar-model" src="/static/{{ exercise }}_avatar.glb"></a-asset-item>
 
-            <img id="park-texture" src="https://live.staticflickr.com/65535/49931679483_70208b688d_b.jpg">
-            <a-asset-item id="avatar-model" src="/static/pushup_avatar.glb"></a-asset-item>
+            {% if env == 'gym' %}
+                <img id="bg-media" src="/static/gym.png">
+            {% else %}
+                <video id="bg-media"
+                    src="/static/{{ env }}.mp4" 
+                    preload="metadata"
+                    muted
+                    loop
+                    playsinline
+                    webkit-playsinline
+                    crossorigin="anonymous">
+                </video>
+            {% endif %}
         </a-assets>
 
-        <a-videosphere 
-            src="#temple"
-            rotation="0 180 0"
-            material="shader: flat; side: back"
-            stereo="eye: mono">
-        </a-videosphere>
+        {% if env == 'gym' %}
+            <a-sky src="#bg-media" rotation="0 -90 0"></a-sky>
+        {% else %}
+            <a-videosphere 
+                src="#bg-media"
+                rotation="0 180 0"
+                material="shader: flat; side: back"
+                stereo="eye: mono">
+            </a-videosphere>
+        {% endif %}
 
         <a-light type="ambient" color="#FFF" intensity="0.8"></a-light>
         <a-light type="directional" position="-1 1 0"></a-light>
@@ -152,7 +157,7 @@
         var statusText = document.querySelector('#status-text');
         var timerDisplay = document.getElementById('timer-display');
 
-        // --- UPDATED: TIMER LOGIC ---
+        // --- TIMER LOGIC ---
         var elapsed = 0;
         setInterval(function() {
             elapsed++;
@@ -188,7 +193,7 @@
             if(data.reps !== undefined) {
                 scoreText.setAttribute('value', "Reps: " + data.reps);
             }
-            if(data.status === "Push Now!" || data.status === "Up!") {
+            if(data.status === "Push Now!" || data.status === "Up!" || data.status === "Squat!" || data.status === "Stand Up!" || data.status === "Jump!" || data.status === "Arms Down!" || data.status === "Reach Up!" || data.status === "Bend Down!") {
                 statusText.setAttribute('value', data.status);
             }
         });
@@ -196,16 +201,17 @@
 
     <script>
         document.querySelector('a-scene').addEventListener('loaded', async () => {
-            const video = document.querySelector('#temple');
+            const media = document.querySelector('#bg-media');
 
-            // wait for user gesture once
-            document.body.addEventListener('click', async () => {
-                video.muted = true;
-                await video.play();
-            }, { once: true });
+            // Only wait for user gesture to play if it's a video file
+            if (media && media.tagName.toLowerCase() === 'video') {
+                document.body.addEventListener('click', async () => {
+                    media.muted = true;
+                    await media.play();
+                }, { once: true });
+            }
         });
     </script>
-
 
 </body>
 </html>

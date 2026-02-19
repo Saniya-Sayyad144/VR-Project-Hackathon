@@ -6,13 +6,15 @@ from flask_socketio import SocketIO, emit
 from threading import Thread
 from openai import OpenAI 
 
+# Import your new exercise logic file
+import exercise_logic
+
 # --- CONFIGURATION ---
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'hackathon_secret'
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# --- GROQ SETUP (Updated Model) ---
-# 🔴 PASTE YOUR GROQ KEY BELOW 🔴
+# --- GROQ SETUP ---
 client = OpenAI(
     base_url="https://api.groq.com/openai/v1",
     api_key="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"
@@ -23,6 +25,8 @@ mp_pose = mp.solutions.pose
 mp_drawing = mp.solutions.drawing_utils
 pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
+# Global trackers
+active_exercise = "pushup" # Default
 current_stage = "up"
 rep_count = 0
 
@@ -41,22 +45,21 @@ def coach():
 
 @app.route('/vr')
 def vr_session():
+    global active_exercise, rep_count, current_stage
     env = request.args.get('env', 'gym') 
-    exercise = request.args.get('ex', 'pushup')
-    return render_template('index.html', env=env, exercise=exercise)
+    
+    # Read which exercise was clicked on the dashboard
+    active_exercise = request.args.get('ex', 'pushup')
+    
+    # Reset counters for the new exercise
+    rep_count = 0
+    current_stage = "up"
+    
+    return render_template('index.html', env=env, exercise=active_exercise)
 
 # --- AI VISION LOGIC ---
-def calculate_angle(a, b, c):
-    a = np.array(a)
-    b = np.array(b)
-    c = np.array(c)
-    radians = np.arctan2(c[1]-b[1], c[0]-b[0]) - np.arctan2(a[1]-b[1], a[0]-b[0])
-    angle = np.abs(radians*180.0/np.pi)
-    if angle > 180.0: angle = 360-angle
-    return angle
-
 def process_webcam():
-    global current_stage, rep_count
+    global current_stage, rep_count, active_exercise
     cap = cv2.VideoCapture(0)
 
     while True:
@@ -73,27 +76,21 @@ def process_webcam():
             mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
             try:
                 landmarks = results.pose_landmarks.landmark
-                # Right Arm
-                shoulder = [landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value].x,
-                            landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value].y]
-                elbow = [landmarks[mp_pose.PoseLandmark.RIGHT_ELBOW.value].x,
-                         landmarks[mp_pose.PoseLandmark.RIGHT_ELBOW.value].y]
-                wrist = [landmarks[mp_pose.PoseLandmark.RIGHT_WRIST.value].x,
-                         landmarks[mp_pose.PoseLandmark.RIGHT_WRIST.value].y]
                 
-                angle = calculate_angle(shoulder, elbow, wrist)
+                # --- Send to the logic module ---
+                rep_count, current_stage, status, play_audio = exercise_logic.detect_exercise(
+                    active_exercise, landmarks, current_stage, rep_count
+                )
                 
-                if angle < 90: current_stage = "down"
-                if angle > 160 and current_stage == 'down':
-                    current_stage = "up"
-                    rep_count += 1
+                # --- Trigger events based on response ---
+                if play_audio:
                     socketio.emit('play_audio', {'file': 'good'})
 
                 socketio.emit('update_vr', {
                     'reps': rep_count,
-                    'status': "Push!" if current_stage == "up" else "Up!"
+                    'status': status
                 })
-            except:
+            except Exception as e:
                 pass
         
         cv2.imshow('PhysioVR Vision', image) 
@@ -102,14 +99,13 @@ def process_webcam():
     cap.release()
     cv2.destroyAllWindows()
 
-# --- CHAT LOGIC ---
+# --- CHAT LOGIC (Unchanged) ---
 @socketio.on('send_chat')
 def handle_chat(data):
     user_text = data['message']
     print(f"User asked: {user_text}")
 
     try:
-        # UPDATED MODEL NAME BELOW
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile", 
             messages=[
