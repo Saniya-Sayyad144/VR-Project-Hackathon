@@ -68,7 +68,6 @@
             }
 
             const media = document.querySelector("#bg-media");
-            // If the environment is a video, we need to play it. Images don't play.
             if (media && media.tagName.toLowerCase() === 'video') {
                 await media.play();
             }
@@ -104,10 +103,21 @@
             <a-asset-item id="avatar-model" src="/static/{{ exercise }}_avatar.glb"></a-asset-item>
 
             {% if env == 'gym' %}
-                <img id="bg-media" src="/static/gym.png">
+                <img id="bg-media" src="/static/gym.png?v=2">
+                
+            {% elif env == 'zen' %} <video id="bg-media"
+                    src="/static/{{ env }}.mov?v=2" 
+                    preload="metadata"
+                    muted
+                    loop
+                    playsinline
+                    webkit-playsinline
+                    crossorigin="anonymous">
+                </video>
+                
             {% else %}
                 <video id="bg-media"
-                    src="/static/{{ env }}.mp4" 
+                    src="/static/{{ env }}.mp4?v=2" 
                     preload="metadata"
                     muted
                     loop
