@@ -109,6 +109,7 @@
 
         <a-assets>
             <audio id="snd-good" src="/static/good.mp3"></audio>
+            <audio id="bg-music" src="/static/bgmusic.mp3" loop preload="auto"></audio>
             <a-asset-item id="avatar-model" src="/static/{{ model_filename }}.glb"></a-asset-item>
         </a-assets>
 
@@ -144,13 +145,14 @@
         var socket = io();
         const urlParams = new URLSearchParams(window.location.search);
         
-        // YOUR UPDATED LOGIC FOR TARGET/MODE
         const targetVal = urlParams.get('target') || 10;
         const exerciseType = urlParams.get('ex') || 'pushup';
         const workoutMode = urlParams.get('mode') || 'reps'; 
+        const currentEnv = urlParams.get('env') || 'gym'; // NEW: Get environment
         
         var scoreText = document.querySelector('#score-text');
         var statusText = document.querySelector('#status-text');
+        var bgMusic = document.getElementById('bg-music'); // NEW: Get audio element
 
         // Setup Button and Text based on Mode
         if (workoutMode === 'time') {
@@ -177,6 +179,14 @@
                 if (media && media.tagName.toLowerCase() === 'video') {
                     media.muted = true;
                     try { await media.play(); } catch(e) {}
+                }
+
+                // NEW: Play Background Music if environment is Garden, Cave, or Zen
+                if (currentEnv === 'garden' || currentEnv === 'cave' || currentEnv === 'zen') {
+                    if (bgMusic) {
+                        bgMusic.volume = 0.2; // 20% volume
+                        try { await bgMusic.play(); } catch(e) { console.log("Audio autoplay blocked by browser"); }
+                    }
                 }
 
                 // Send both Target AND Mode to Python
@@ -227,7 +237,10 @@
 
         socket.on('play_audio', function(data) {
             var audio = document.getElementById('snd-' + data.file);
-            if(audio) audio.play();
+            if(audio) {
+                audio.volume = 1.0; // Ensure sound effects stay at 100% volume
+                audio.play();
+            }
         });
     </script>
     <script src="/static/auth-check.js"></script>
