@@ -144,6 +144,233 @@ def about():
 def coach():
     return render_template('coach.html')
 
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    return render_template('dashboard.html')
+
+
+@app.route('/api/dashboard-data', methods=['GET'])
+@login_required
+def api_dashboard_data():
+    user_id = request.user_id
+    try:
+        conn = mysql_helper.get_mysql_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        # Aggregate totals (gracefully handle missing columns)
+        try:
+            cursor.execute(
+                """
+                SELECT
+                    COALESCE(SUM(duration),0) AS total_exercise_time,
+                    COALESCE(SUM(vr_time),0) AS total_vr_time,
+                    COALESCE(SUM(reps),0) AS total_reps,
+                    AVG(fatigue) AS avg_fatigue
+                FROM sessions
+                WHERE user_id = %s
+                """, (user_id,)
+            )
+            agg = cursor.fetchone() or {}
+        except Exception:
+            agg = {'total_exercise_time': 0, 'total_vr_time': 0, 'total_reps': 0, 'avg_fatigue': None}
+
+        # Recent daily sessions
+        try:
+            cursor.execute(
+                """
+                SELECT DATE(created_at) as date, exercise_name, duration, reps, fatigue
+                FROM sessions
+                WHERE user_id = %s
+                ORDER BY created_at DESC
+                LIMIT 100
+                """, (user_id,)
+            )
+            rows = cursor.fetchall()
+            sessions = []
+            for r in rows:
+                sessions.append({
+                    'date': r.get('date').strftime('%Y-%m-%d') if r.get('date') else None,
+                    'exercise_name': r.get('exercise_name'),
+                    'duration': int(r.get('duration') or 0),
+                    'reps': int(r.get('reps') or 0),
+                    'fatigue': r.get('fatigue')
+                })
+        except Exception:
+            sessions = []
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({
+            'total_exercise_time': int(agg.get('total_exercise_time') or 0),
+            'total_vr_time': int(agg.get('total_vr_time') or 0),
+            'total_reps': int(agg.get('total_reps') or 0),
+            'avg_fatigue': float(agg['avg_fatigue']) if agg.get('avg_fatigue') is not None else None,
+            'sessions': sessions
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/export/today', methods=['GET'])
+@login_required
+def export_today():
+    user_id = request.user_id
+    try:
+        conn = mysql_helper.get_mysql_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT exercise_name, duration, reps, fatigue
+            FROM sessions
+            WHERE user_id = %s AND DATE(created_at) = CURDATE()
+            ORDER BY created_at
+            """, (user_id,)
+        )
+        rows = cursor.fetchall()
+
+        # Summaries
+        total_duration = sum(int(r.get('duration') or 0) for r in rows)
+        total_reps = sum(int(r.get('reps') or 0) for r in rows)
+        fatigue_vals = [r.get('fatigue') for r in rows if r.get('fatigue') is not None]
+        avg_fatigue = (sum(fatigue_vals) / len(fatigue_vals)) if fatigue_vals else None
+
+        cursor.close()
+        conn.close()
+
+        # Generate PDF using reportlab (if available)
+        try:
+            from reportlab.lib.pagesizes import letter
+            from reportlab.pdfgen import canvas
+        except Exception:
+            return jsonify({'error': 'reportlab is required for PDF export. pip install reportlab'}), 500
+
+        from io import BytesIO
+        buffer = BytesIO()
+        c = canvas.Canvas(buffer, pagesize=letter)
+        width, height = letter
+        y = height - 50
+
+        c.setFont('Helvetica-Bold', 16)
+        c.drawString(50, y, 'User Daily Physiotherapy Report')
+        y -= 25
+        from datetime import datetime
+        c.setFont('Helvetica', 10)
+        c.drawString(50, y, f"Date: {datetime.now().strftime('%Y-%m-%d')}")
+        y -= 25
+
+        c.setFont('Helvetica-Bold', 12)
+        c.drawString(50, y, 'Exercise Summary:')
+        y -= 18
+        c.setFont('Helvetica', 10)
+        if not rows:
+            c.drawString(60, y, 'No sessions found for today')
+            y -= 14
+        else:
+            for r in rows:
+                line = f"- {r.get('exercise_name')} — {r.get('reps') or 0} reps — {int(r.get('duration') or 0)} sec"
+                c.drawString(60, y, line)
+                y -= 14
+                if y < 60:
+                    c.showPage()
+                    y = height - 50
+
+        y -= 8
+        c.setFont('Helvetica-Bold', 12)
+        c.drawString(50, y, 'Totals:')
+        y -= 16
+        c.setFont('Helvetica', 10)
+        c.drawString(60, y, f"Total duration: {total_duration} seconds")
+        y -= 14
+        c.drawString(60, y, f"Total reps: {total_reps}")
+        y -= 14
+        c.drawString(60, y, f"Fatigue: {avg_fatigue if avg_fatigue is not None else ''}")
+
+        c.showPage()
+        c.save()
+        buffer.seek(0)
+
+        from flask import send_file
+        return send_file(buffer, as_attachment=True, download_name='today_report.pdf', mimetype='application/pdf')
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/ai/day-analysis', methods=['POST'])
+@login_required
+def ai_day_analysis():
+    user_id = request.user_id
+    try:
+        conn = mysql_helper.get_mysql_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT exercise_name, duration, reps, fatigue
+            FROM sessions
+            WHERE user_id = %s AND DATE(created_at) = CURDATE()
+            ORDER BY created_at
+            """, (user_id,)
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        # Build structured summary text
+        summary_lines = []
+        exercises = {}
+        total_vr = 0
+        fatigue_vals = []
+        for r in rows:
+            name = r.get('exercise_name') or 'Unknown'
+            duration = int(r.get('duration') or 0)
+            reps = int(r.get('reps') or 0)
+            exercises.setdefault(name, []).append((reps, duration))
+            total_vr += 0
+            if r.get('fatigue') is not None:
+                fatigue_vals.append(r.get('fatigue'))
+
+        for name, sets in exercises.items():
+            sets_desc = []
+            for s in sets:
+                sets_desc.append(f"{s[0]} reps - {s[1]} sec")
+            summary_lines.append(f"{name} – {len(sets)} sets – {'; '.join(sets_desc)}")
+
+        summary_text = 'Exercises performed:\n' + ('\n'.join(summary_lines) if summary_lines else 'None') + '\n\n'
+        summary_text += f"Total VR time: {total_vr} minutes\n"
+        summary_text += f"Fatigue: { (sum(fatigue_vals)/len(fatigue_vals)) if fatigue_vals else 'N/A' }\n"
+
+        prompt = (
+            "You are a physiotherapy health assistant. Analyze the user's daily rehabilitation activity and provide helpful feedback.\n\n"
+            "Explain:\n\n"
+            "* how active the user was\n"
+            "* whether the activity level was healthy\n"
+            "* improvement suggestions\n"
+            "* recovery advice\n"
+            "* posture and breathing suggestions\n"
+            "* diet suggestion for recovery\n"
+            "* motivation feedback\n\n"
+            "Be supportive, short, and practical."
+        )
+
+        try:
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": summary_text}
+                ]
+            )
+            ai_reply = response.choices[0].message.content
+        except Exception:
+            ai_reply = "AI analysis unavailable right now."
+
+        return jsonify({'analysis': ai_reply})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/vr')
 def vr_session():
     global active_exercise
