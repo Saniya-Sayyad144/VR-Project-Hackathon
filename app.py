@@ -1,19 +1,31 @@
+import os
 import cv2
 import mediapipe as mp
 import numpy as np
 import time
-from flask import Flask, render_template, request
+from functools import wraps
+from flask import Flask, render_template, request, jsonify, redirect
 from flask_socketio import SocketIO, emit
 from threading import Thread
 from openai import OpenAI 
 from dotenv import load_dotenv
 
 import exercise_logic
+import mysql_helper
+import bcrypt
+import jwt
+import jwt_handler
+from login_required import login_required
+
 load_dotenv()
 
 # --- CONFIGURATION ---
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv("FLASK_SECRET_KEY", "dev_secret")
+
+# JWT secret (use Flask secret key)
+JWT_SECRET = app.config['SECRET_KEY']
+JWT_ALGORITHM = 'HS256'
 
 socketio = SocketIO(app, cors_allowed_origins="*")
 
@@ -42,9 +54,87 @@ exercise_state = {
     'status': 'Get into position'
 }
 
+# --- ROUTES ---
+
 @app.route('/')
 def home():
-    return render_template('home.html')
+    return render_template('home.html', auth_check=True)
+
+@app.route('/login-page', methods=['GET'])
+def login_page():
+    return render_template('login.html')
+
+@app.route('/register-page', methods=['GET'])
+def register_page():
+    return render_template('register.html')
+
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    username = data.get('username')
+    email = data.get('email')
+    password = data.get('password')
+    if not username or not email or not password:
+        return jsonify({'error': 'Missing fields'}), 400
+
+    # Hash the password
+    hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+    hashed_str = hashed.decode('utf-8')
+
+    try:
+        conn = mysql_helper.get_mysql_connection()
+        cursor = conn.cursor(prepared=True)
+        sql = "INSERT INTO users (username, email, password) VALUES (%s, %s, %s)"
+        cursor.execute(sql, (username, email, hashed_str))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return jsonify({'message': 'User registered successfully'}), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    email = data.get('email')
+    password = data.get('password')
+    if not email or not password:
+        return jsonify({'error': 'Missing fields'}), 400
+    try:
+        conn = mysql_helper.get_mysql_connection()
+        cursor = conn.cursor(prepared=True)
+        sql = "SELECT id, username, password FROM users WHERE email = %s"
+        cursor.execute(sql, (email,))
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        if not row:
+            return jsonify({'error': 'Invalid credentials'}), 401
+        user_id, username, hashed_str = row
+        if isinstance(hashed_str, str):
+            stored_hash = hashed_str.encode('utf-8')
+        else:
+            stored_hash = hashed_str
+        if not bcrypt.checkpw(password.encode('utf-8'), stored_hash):
+            return jsonify({'error': 'Invalid credentials'}), 401
+        # Generate JWT token
+        token = jwt_handler.create_token(user_id)
+        resp = jsonify({'message': 'Login successful'})
+        resp.set_cookie('token', token, httponly=True, samesite='Lax')
+        return resp, 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/check-auth', methods=['GET'])
+@login_required
+def check_auth():
+    return '', 200
+
+@app.route('/logout', methods=['GET'])
+def logout():
+    resp = redirect('/login-page')
+    resp.set_cookie('token', '', expires=0, httponly=True, samesite='Lax')
+    return resp
 
 @app.route('/about')
 def about():
