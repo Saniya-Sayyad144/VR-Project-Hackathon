@@ -395,7 +395,7 @@ def handle_start_workout(data):
     is_workout_active = True
     
     # Reset the state dictionary for a fresh workout
-    exercise_state = {'stage': 'up', 'reps': 0, 'lowest_angle': 180, 'status': 'Ready!'}
+    exercise_state = {'stage': 'up', 'reps': 0, 'lowest_angle': 180, 'status': 'Ready!', 'fatigue_index': 0.0, 'fatigue_alerts': []}
     
     if workout_mode == 'time':
         target_duration = int(data.get('target', 5)) * 60 
@@ -405,11 +405,15 @@ def handle_start_workout(data):
         target_reps = int(data.get('target', 10))
         emit('update_vr', {'status': 'Get Ready!', 'score_text': f'Reps: 0 / {target_reps}'})
 
+# --- AI VISION LOGIC ---
 def process_webcam():
     global active_exercise, is_workout_active, exercise_state
     global target_reps, workout_mode, start_time, target_duration
     
     cap = cv2.VideoCapture(0)
+    
+    # NEW: Smoothed fatigue value to prevent sudden jumps
+    smoothed_fatigue = 0.0
 
     while True:
         ret, frame = cap.read()
@@ -423,6 +427,7 @@ def process_webcam():
 
         score_text = ""
         current_status = "Waiting..."
+        alert_text = ""
 
         if results.pose_landmarks:
             mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
@@ -439,6 +444,22 @@ def process_webcam():
                     # Extract updated info
                     rep_count = exercise_state['reps']
                     current_status = exercise_state['status']
+                    
+                    # --- Extract Fatigue info ---
+                    raw_f_index = exercise_state.get('fatigue_index', 0.0)
+                    f_alerts = exercise_state.get('fatigue_alerts', [])
+                    
+                    # Apply smoothing (alpha = 0.1) so the score glides up/down slowly
+                    smoothed_fatigue = (0.1 * raw_f_index) + (0.9 * smoothed_fatigue)
+                    
+                    # Format the alerts for the VR display
+                    alert_text = ""
+                    if f_alerts:
+                        # Prioritize showing the actual reason over a generic warning
+                        alert_text = "⚠ " + f_alerts[-1] 
+                        current_status = alert_text # Briefly override normal feedback
+                    elif smoothed_fatigue > 75:
+                        alert_text = "CRITICAL FATIGUE"
                     
                     if workout_mode == 'reps':
                         score_text = f"Reps: {rep_count} / {target_reps}"
@@ -461,10 +482,12 @@ def process_webcam():
                             current_status = "Meditation Complete!"
                             socketio.emit('play_audio', {'file': 'good'})
 
-                    # Only emit updates to VR
+                    # Emit updates to VR
                     socketio.emit('update_vr', {
                         'score_text': score_text,
-                        'status': current_status
+                        'status': current_status,
+                        'fatigue_score': smoothed_fatigue, 
+                        'fatigue_text': alert_text  
                     })
                 except Exception as e:
                     pass
@@ -479,9 +502,13 @@ def process_webcam():
                     current_status = "Click Start"
                     score_text = "Ready"
                 
+                # Reset fatigue visuals when not active
+                smoothed_fatigue = 0.0
                 socketio.emit('update_vr', {
                     'score_text': score_text,
-                    'status': current_status
+                    'status': current_status,
+                    'fatigue_score': 0.0,
+                    'fatigue_text': ""
                 })
         
         cv2.imshow('PhysioVR Vision', image) 
@@ -489,7 +516,6 @@ def process_webcam():
 
     cap.release()
     cv2.destroyAllWindows()
-
 @socketio.on('send_chat')
 def handle_chat(data):
     # ... (Keep your existing chat logic here) ...

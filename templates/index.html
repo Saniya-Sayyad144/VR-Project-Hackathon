@@ -126,6 +126,9 @@
             <a-entity id="head" camera="fov: 90" look-controls="magicWindowTrackingEnabled: false; touchEnabled: true">
                  <a-text id="score-text" value="Ready" position="-0.4 0.4 -1" color="white" width="1.8" font="exo2bold"></a-text>
                  <a-text id="status-text" value="Click Start" position="0.1 0.4 -1" color="#00d2ff" width="1.8" font="exo2bold"></a-text>
+                 
+                 <a-text id="fatigue-hud" value="" position="-0.3 0.2 -1" color="#FF3333" width="1.5" font="exo2bold" visible="false"></a-text>
+                 <a-plane id="fatigue-red-screen" position="0 0 -0.5" width="4" height="4" color="#FF0000" material="opacity: 0.0; transparent: true"></a-plane>
             </a-entity>
         </a-entity>
 
@@ -148,13 +151,14 @@
         const targetVal = urlParams.get('target') || 10;
         const exerciseType = urlParams.get('ex') || 'pushup';
         const workoutMode = urlParams.get('mode') || 'reps'; 
-        const currentEnv = urlParams.get('env') || 'gym'; // NEW: Get environment
+        const currentEnv = urlParams.get('env') || 'gym'; 
         
         var scoreText = document.querySelector('#score-text');
         var statusText = document.querySelector('#status-text');
-        var bgMusic = document.getElementById('bg-music'); // NEW: Get audio element
+        var bgMusic = document.getElementById('bg-music'); 
+        var fatigueHud = document.querySelector('#fatigue-hud');
+        var fatigueScreen = document.querySelector('#fatigue-red-screen');
 
-        // Setup Button and Text based on Mode
         if (workoutMode === 'time') {
             document.getElementById('vrbtn').innerText = "START MEDITATION (" + targetVal + " Mins)";
             scoreText.setAttribute('value', "Target: " + targetVal + " Mins");
@@ -181,15 +185,13 @@
                     try { await media.play(); } catch(e) {}
                 }
 
-                // NEW: Play Background Music if environment is Garden, Cave, or Zen
                 if (currentEnv === 'garden' || currentEnv === 'cave' || currentEnv === 'zen') {
                     if (bgMusic) {
-                        bgMusic.volume = 0.2; // 20% volume
-                        try { await bgMusic.play(); } catch(e) { console.log("Audio autoplay blocked by browser"); }
+                        bgMusic.volume = 0.2; 
+                        try { await bgMusic.play(); } catch(e) { console.log("Audio autoplay blocked"); }
                     }
                 }
 
-                // Send both Target AND Mode to Python
                 socket.emit('start_workout', { target: targetVal, mode: workoutMode });
                 
                 startTimer();
@@ -210,7 +212,7 @@
 
         const feedbackMessages = {
             'cardio': ["Keep your pace!", "Breathe!", "Push it!"],
-            'yoga': ["Focus on breathing.", "Clear your mind.", "Find your center."], // Changed for meditation
+            'yoga': ["Focus on breathing.", "Clear your mind.", "Find your center."], 
             'pushup': ["Keep back straight!", "Lower chest to floor!", "Great form!"],
             'squat': ["Knees out!", "Chest up!", "Drive through heels!"]
         };
@@ -225,7 +227,9 @@
             }
         }, 10000);
 
-        // Python now controls exactly what the score text says (e.g. "Time Left: 2:30" or "Reps: 4/10")
+        // --- NEW: Client-side Fatigue Smoothing ---
+        let displayOpacity = 0.0; // Gradually tracks target opacity
+        
         socket.on('update_vr', function(data) {
             if(data.score_text && scoreText) {
                 scoreText.setAttribute('value', data.score_text);
@@ -233,12 +237,36 @@
             if(data.status && statusText) {
                 statusText.setAttribute('value', data.status);
             }
+            
+            // Handle Smooth Fatigue Visuals
+            if(data.fatigue_score !== undefined) {
+                // Determine target opacity based on fatigue score (e.g. over 60 starts turning red)
+                let targetOpacity = 0.0;
+                if (data.fatigue_score > 60.0) {
+                    // Map score 60-100 to opacity 0.1-0.5
+                    targetOpacity = Math.min(((data.fatigue_score - 60) / 40) * 0.5, 0.5); 
+                }
+                
+                // Smoothly ease the current displayOpacity toward the target
+                displayOpacity += (targetOpacity - displayOpacity) * 0.1; // 0.1 controls the speed of the fade
+                
+                // Only show warning text if fatigue is very high (e.g. > 75)
+                if (data.fatigue_score > 75.0) {
+                    fatigueHud.setAttribute('visible', 'true');
+                    fatigueHud.setAttribute('value', data.fatigue_text);
+                } else {
+                    fatigueHud.setAttribute('visible', 'false');
+                }
+                
+                // Apply the smoothed opacity
+                fatigueScreen.setAttribute('material', 'opacity: ' + displayOpacity.toFixed(2));
+            }
         });
 
         socket.on('play_audio', function(data) {
             var audio = document.getElementById('snd-' + data.file);
             if(audio) {
-                audio.volume = 1.0; // Ensure sound effects stay at 100% volume
+                audio.volume = 1.0; 
                 audio.play();
             }
         });

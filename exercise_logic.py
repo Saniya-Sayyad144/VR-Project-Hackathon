@@ -1,6 +1,7 @@
 import numpy as np
 import mediapipe as mp
 import random
+import time
 
 mp_pose = mp.solutions.pose
 
@@ -42,13 +43,21 @@ def get_single_angle(landmarks, joints, threshold=0.5):
 def detect_exercise(exercise_type, landmarks, state):
     """Routes the landmark data to the correct exercise logic using state memory."""
     play_audio = False
+    current_time = time.time()
     
-    # Read current state memory
+    # 1. Read current state memory
     stage = state.get('stage', 'up')
     reps = state.get('reps', 0)
     lowest_angle = state.get('lowest_angle', 180)      
     worst_posture = state.get('worst_posture', 180)    
     status = state.get('status', 'Get into position')
+    
+    # 2. NEW: Fatigue Engine Variables
+    fatigue_index = state.get('fatigue_index', 0.0)
+    fatigue_alerts = state.get('fatigue_alerts', [])
+    prev_hip_y = state.get('prev_hip_y', None)
+    prev_time = state.get('prev_time', current_time)
+    baseline_vel = state.get('baseline_vel', None)
 
     # ==========================================
     # 1. PUSH-UP LOGIC (Unchanged)
@@ -92,7 +101,7 @@ def detect_exercise(exercise_type, landmarks, state):
 
 
     # ==========================================
-    # 2. PISTOL SQUAT LOGIC (Completely Rewritten)
+    # 2. PISTOL SQUAT LOGIC (With Fatigue Engine)
     # ==========================================
     elif exercise_type == "squat":
         # Calculate left and right legs independently
@@ -102,7 +111,7 @@ def detect_exercise(exercise_type, landmarks, state):
         l_hip = get_single_angle(landmarks, (mp_pose.PoseLandmark.LEFT_SHOULDER, mp_pose.PoseLandmark.LEFT_HIP, mp_pose.PoseLandmark.LEFT_KNEE))
         r_hip = get_single_angle(landmarks, (mp_pose.PoseLandmark.RIGHT_SHOULDER, mp_pose.PoseLandmark.RIGHT_HIP, mp_pose.PoseLandmark.RIGHT_KNEE))
 
-        # Dynamically find the "Active" leg (the one doing the squat / bending the most)
+        # Dynamically find the "Active" leg
         active_knee = None
         active_hip = None
         
@@ -120,20 +129,42 @@ def detect_exercise(exercise_type, landmarks, state):
             state['status'] = "I can't see your legs! Step back."
             return state, False
             
+        # --- FATIGUE: Calculate Hip Velocity ---
+        hip_y = (landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].y + landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value].y) / 2.0
+        dt = current_time - prev_time
+        current_vel = 0
+        if prev_hip_y is not None and dt > 0:
+            current_vel = abs(hip_y - prev_hip_y) / dt
+
+        # Reset active alerts for this frame
+        fatigue_alerts.clear()
+
         # Memory: Record the lowest point of the single leg
         if stage == 'down' or active_knee < 140:
             lowest_angle = min(lowest_angle, active_knee)
             worst_posture = min(worst_posture, active_hip)
             
-        # Transitions
-        if active_knee > 160: # Standing back up straight
+        # Transitions & Fatigue Checks
+        if active_knee > 160: 
             if stage == 'down':
-                # Pistol squats are incredibly hard, so the depth threshold is a bit more forgiving (110 degrees)
+                # 1. Check Depth (Incomplete Extension Fatigue)
                 if lowest_angle > 110: 
                     status = random.choice(["Go lower! Get that balance.", "Half-rep! Try to sink deeper on that single leg."])
+                    fatigue_alerts.append("Incomplete Depth")
+                    fatigue_index += 15.0
+                # 2. Check Form (Core Collapse Fatigue)
                 elif worst_posture < 60:
                     status = random.choice(["Keep your chest up!", "Don't collapse forward! Engage your core."])
+                    fatigue_alerts.append("Form Collapse")
+                    fatigue_index += 20.0
                 else:
+                    # Good rep! Check upward velocity fatigue
+                    if baseline_vel is None:
+                        baseline_vel = current_vel # Calibrate on first good rep
+                    elif current_vel < (baseline_vel * 0.5): # 50% slower than normal
+                        fatigue_alerts.append("Speed Dropping")
+                        fatigue_index += 10.0
+
                     reps += 1
                     play_audio = True
                     status = random.choice(["Amazing balance! Great pistol squat.", "Textbook single-leg squat!", "Wow, perfect depth!"])
@@ -150,6 +181,19 @@ def detect_exercise(exercise_type, landmarks, state):
         elif 100 <= active_knee <= 160:
             if stage == 'up': status = "Control the descent, keep your balance..."
 
+        # Cool down fatigue slowly if no alerts are active
+        if not fatigue_alerts:
+            fatigue_index = max(0.0, fatigue_index - 0.2)
+            
+        # Cap fatigue at 100
+        fatigue_index = min(100.0, fatigue_index)
+        
+        # Update trackers
+        state['prev_hip_y'] = hip_y
+        state['prev_time'] = current_time
+        state['baseline_vel'] = baseline_vel
+
+
     # Placeholder for other modules
     elif exercise_type in ["cardio", "yoga"]:
         status = "Module currently under construction. Please use Push-ups or Squats."
@@ -160,5 +204,9 @@ def detect_exercise(exercise_type, landmarks, state):
     state['lowest_angle'] = lowest_angle
     state['worst_posture'] = worst_posture
     state['status'] = status
+    
+    # Save Fatigue variables
+    state['fatigue_index'] = fatigue_index
+    state['fatigue_alerts'] = fatigue_alerts
 
     return state, play_audio
