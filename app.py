@@ -6,7 +6,7 @@ from flask_socketio import SocketIO, emit
 from threading import Thread
 from openai import OpenAI 
 
-# Import your new exercise logic file
+# Import your exercise logic file
 import exercise_logic
 
 # --- CONFIGURATION ---
@@ -29,6 +29,8 @@ pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 active_exercise = "pushup" # Default
 current_stage = "up"
 rep_count = 0
+target_reps = 10
+is_workout_active = False
 
 # --- ROUTES ---
 @app.route('/')
@@ -45,21 +47,37 @@ def coach():
 
 @app.route('/vr')
 def vr_session():
-    global active_exercise, rep_count, current_stage
+    global active_exercise
     env = request.args.get('env', 'gym') 
     
-    # Read which exercise was clicked on the dashboard
+    # Read which exercise was clicked on the dashboard (pushup, squat, yoga, cardio)
     active_exercise = request.args.get('ex', 'pushup')
     
-    # Reset counters for the new exercise
+    # Map the clean names to your exact .glb file names
+    model_map = {
+        'pushup': 'pushup_avatar',
+        'squat': 'pistol_squads',
+        'yoga': 'meditation',
+        'cardio': 'Surya_namaskar'
+    }
+    model_filename = model_map.get(active_exercise, 'pushup_avatar')
+    
+    return render_template('index.html', env=env, exercise=active_exercise, model_filename=model_filename)
+
+# --- SOCKET EVENTS ---
+@socketio.on('start_workout')
+def handle_start_workout(data):
+    global rep_count, current_stage, target_reps, is_workout_active
+    target_reps = int(data.get('target', 10))
     rep_count = 0
     current_stage = "up"
-    
-    return render_template('index.html', env=env, exercise=active_exercise)
+    is_workout_active = True
+    print(f"Workout Started: Target {target_reps} reps")
+    emit('update_vr', {'status': 'Get Ready!', 'reps': 0})
 
 # --- AI VISION LOGIC ---
 def process_webcam():
-    global current_stage, rep_count, active_exercise
+    global current_stage, rep_count, active_exercise, is_workout_active, target_reps
     cap = cv2.VideoCapture(0)
 
     while True:
@@ -72,26 +90,48 @@ def process_webcam():
         image.flags.writeable = True
         image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
+        status_msg = "Waiting..."
+
         if results.pose_landmarks:
             mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
-            try:
-                landmarks = results.pose_landmarks.landmark
-                
-                # --- Send to the logic module ---
-                rep_count, current_stage, status, play_audio = exercise_logic.detect_exercise(
-                    active_exercise, landmarks, current_stage, rep_count
-                )
-                
-                # --- Trigger events based on response ---
-                if play_audio:
-                    socketio.emit('play_audio', {'file': 'good'})
+            
+            if is_workout_active:
+                try:
+                    landmarks = results.pose_landmarks.landmark
+                    
+                    # --- Send to the logic module ---
+                    new_reps, current_stage, status_msg, play_audio = exercise_logic.detect_exercise(
+                        active_exercise, landmarks, current_stage, rep_count
+                    )
+                    
+                    rep_count = new_reps
+                    
+                    # --- Check for Completion ---
+                    if rep_count >= target_reps:
+                        is_workout_active = False
+                        status_msg = "Goal Reached!"
+                        socketio.emit('play_audio', {'file': 'good'}) 
+                    
+                    # --- Trigger events ---
+                    if play_audio and is_workout_active:
+                        socketio.emit('play_audio', {'file': 'good'})
 
+                    socketio.emit('update_vr', {
+                        'reps': rep_count,
+                        'status': status_msg
+                    })
+                except Exception as e:
+                    pass
+            else:
+                if rep_count >= target_reps and target_reps > 0:
+                    status_msg = "Session Done!"
+                else:
+                    status_msg = "Click Start"
+                
                 socketio.emit('update_vr', {
                     'reps': rep_count,
-                    'status': status
+                    'status': status_msg
                 })
-            except Exception as e:
-                pass
         
         cv2.imshow('PhysioVR Vision', image) 
         if cv2.waitKey(10) & 0xFF == ord('q'): break
@@ -99,7 +139,7 @@ def process_webcam():
     cap.release()
     cv2.destroyAllWindows()
 
-# --- CHAT LOGIC (Unchanged) ---
+# --- CHAT LOGIC ---
 @socketio.on('send_chat')
 def handle_chat(data):
     user_text = data['message']

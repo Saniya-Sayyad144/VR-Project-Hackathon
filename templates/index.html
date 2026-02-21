@@ -9,44 +9,21 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
-
-        /* --- MOBILE-FIRST SESSION OVERLAY --- */
         .session-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            padding: 15px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            z-index: 1000;
-            pointer-events: none;
+            position: fixed; top: 0; left: 0; width: 100%; padding: 15px 20px;
+            display: flex; justify-content: space-between; align-items: center;
+            z-index: 1000; pointer-events: none;
         }
-
         .exit-btn {
-            pointer-events: auto;
-            background: rgba(255, 50, 50, 0.8);
-            color: white;
-            text-decoration: none;
-            padding: 8px 20px;
-            border-radius: 50px;
-            font-weight: bold;
-            font-size: 14px;
-            backdrop-filter: blur(5px);
-            border: 1px solid rgba(255,255,255,0.2);
-            transition: 0.3s;
+            pointer-events: auto; background: rgba(255, 50, 50, 0.8); color: white;
+            text-decoration: none; padding: 8px 20px; border-radius: 50px;
+            font-weight: bold; font-size: 14px; backdrop-filter: blur(5px);
+            border: 1px solid rgba(255,255,255,0.2); transition: 0.3s;
         }
-
         .exit-btn:hover { background: #ff3232; transform: scale(1.05); }
-
         .session-info {
-            color: #00d2ff;
-            font-weight: bold;
-            text-shadow: 0 0 10px rgba(0,0,0,0.8);
-            font-size: 14px;
+            color: #00d2ff; font-weight: bold; text-shadow: 0 0 10px rgba(0,0,0,0.8); font-size: 14px;
         }
-
         @media (min-width: 768px) {
             .exit-btn { font-size: 16px; padding: 10px 25px; }
             .session-info { font-size: 18px; }
@@ -56,43 +33,17 @@
 <body>
 
     <div class="session-overlay">
-        <div class="session-info" id="timer-display">00:00</div>
+        <div class="session-info" id="timer-display">Ready?</div>
         <a href="/" class="exit-btn">EXIT SESSION</a>
     </div>
-    
-    <script>
-        async function enableVR(){
-            if (typeof DeviceOrientationEvent !== "undefined" &&
-                typeof DeviceOrientationEvent.requestPermission === "function") {
-                await DeviceOrientationEvent.requestPermission();
-            }
-
-            const media = document.querySelector("#bg-media");
-            if (media && media.tagName.toLowerCase() === 'video') {
-                await media.play();
-            }
-
-            document.querySelector("a-scene").enterVR();
-        }
-    </script>
 
     <button id="vrbtn" onclick="enableVR()"
         style="
-        position:fixed;
-        bottom:20px;
-        left:50%;
-        transform:translateX(-50%);
-        z-index:9999;
-        background:#00d2ff;
-        color:black;
-        padding:14px 22px;
-        border-radius:30px;
-        border:none;
-        font-weight:bold;
-        font-size:16px;
-        box-shadow:0 0 15px rgba(0,210,255,.6);
-        ">
-        ENTER VR MODE
+        position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+        z-index:9999; background:#00d2ff; color:black; padding:14px 22px;
+        border-radius:30px; border:none; font-weight:bold; font-size:16px;
+        box-shadow:0 0 15px rgba(0,210,255,.6); cursor: pointer;">
+        START WORKOUT
     </button>
 
     <a-scene vr-mode-ui="enabled: true" xr-mode-ui="enabled: true" device-orientation-permission-ui="enabled: false" renderer="antialias: true; colorManagement: true;">
@@ -100,43 +51,21 @@
         <a-assets>
             <audio id="snd-good" src="/static/good.mp3"></audio>
             
-            <a-asset-item id="avatar-model" src="/static/{{ exercise }}_avatar.glb"></a-asset-item>
+            <a-asset-item id="avatar-model" src="/static/{{ model_filename }}.glb"></a-asset-item>
 
             {% if env == 'gym' %}
-                <img id="bg-media" src="/static/gym.png?v=2">
-                
-            {% elif env == 'zen' %} <video id="bg-media"
-                    src="/static/{{ env }}.mov?v=2" 
-                    preload="metadata"
-                    muted
-                    loop
-                    playsinline
-                    webkit-playsinline
-                    crossorigin="anonymous">
-                </video>
-                
+                <img id="bg-media" src="/static/gym.png">
+            {% elif env == 'garden' %} 
+                <video id="bg-media" src="/static/garden.mov" preload="metadata" muted loop playsinline webkit-playsinline crossorigin="anonymous"></video>
             {% else %}
-                <video id="bg-media"
-                    src="/static/{{ env }}.mp4?v=2" 
-                    preload="metadata"
-                    muted
-                    loop
-                    playsinline
-                    webkit-playsinline
-                    crossorigin="anonymous">
-                </video>
+                <video id="bg-media" src="/static/{{ env }}.mp4" preload="metadata" muted loop playsinline webkit-playsinline crossorigin="anonymous"></video>
             {% endif %}
         </a-assets>
 
         {% if env == 'gym' %}
             <a-sky src="#bg-media" rotation="0 -90 0"></a-sky>
         {% else %}
-            <a-videosphere 
-                src="#bg-media"
-                rotation="0 180 0"
-                material="shader: flat; side: back"
-                stereo="eye: mono">
-            </a-videosphere>
+            <a-videosphere src="#bg-media" rotation="0 180 0" material="shader: flat; side: back" stereo="eye: mono"></a-videosphere>
         {% endif %}
 
         <a-light type="ambient" color="#FFF" intensity="0.8"></a-light>
@@ -144,8 +73,8 @@
 
         <a-entity id="rig" position="0 1.6 0"> 
             <a-entity id="head" camera="fov: 90" look-controls="magicWindowTrackingEnabled: false; touchEnabled: true">
-                 <a-text id="score-text" value="Reps: 0" position="-0.4 0.4 -1" color="white" width="1.8" font="exo2bold"></a-text>
-                 <a-text id="status-text" value="Get Ready" position="0.1 0.4 -1" color="#00d2ff" width="1.8" font="exo2bold"></a-text>
+                 <a-text id="score-text" value="Reps: 0 / {{ request.args.get('target', 10) }}" position="-0.4 0.4 -1" color="white" width="1.8" font="exo2bold"></a-text>
+                 <a-text id="status-text" value="Click Start" position="0.1 0.4 -1" color="#00d2ff" width="1.8" font="exo2bold"></a-text>
             </a-entity>
         </a-entity>
 
@@ -163,23 +92,58 @@
 
     <script>
         var socket = io();
+        const urlParams = new URLSearchParams(window.location.search);
+        const targetReps = urlParams.get('target') || 10;
+        const exerciseType = urlParams.get('ex') || 'pushup';
+        
         var scoreText = document.querySelector('#score-text');
         var statusText = document.querySelector('#status-text');
-        var timerDisplay = document.getElementById('timer-display');
 
-        // --- TIMER LOGIC ---
-        var elapsed = 0;
-        setInterval(function() {
-            elapsed++;
-            var minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
-            var seconds = (elapsed % 60).toString().padStart(2, '0');
-            timerDisplay.innerText = minutes + ":" + seconds;
-        }, 1000);
+        // Dynamically update the button text
+        document.getElementById('vrbtn').innerText = "START WORKOUT (Target: " + targetReps + ")";
 
-        // --- FEEDBACK LOGIC ---
-        const urlParams = new URLSearchParams(window.location.search);
-        const exerciseType = urlParams.get('ex') || 'pushup';
+        // Click handler to enter VR mode
+        async function enableVR() {
+            if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+                await DeviceOrientationEvent.requestPermission();
+            }
+            document.querySelector("a-scene").enterVR();
+        }
 
+        // Wait for A-Frame to actually enter VR mode before starting
+        let workoutStarted = false;
+        document.querySelector('a-scene').addEventListener('enter-vr', async function () {
+            if (!workoutStarted) {
+                document.getElementById('vrbtn').style.display = 'none';
+                
+                // Play video if applicable
+                const media = document.querySelector("#bg-media");
+                if (media && media.tagName.toLowerCase() === 'video') {
+                    media.muted = true;
+                    try { await media.play(); } catch(e) {}
+                }
+
+                // Tell Python to start tracking
+                socket.emit('start_workout', { target: targetReps });
+                
+                startTimer();
+                workoutStarted = true;
+            }
+        });
+
+        // Local Timer
+        function startTimer() {
+            var elapsed = 0;
+            var timerDisplay = document.getElementById('timer-display');
+            setInterval(function() {
+                elapsed++;
+                var minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
+                var seconds = (elapsed % 60).toString().padStart(2, '0');
+                timerDisplay.innerText = "Time: " + minutes + ":" + seconds;
+            }, 1000);
+        }
+
+        // Feedback Logic
         const feedbackMessages = {
             'cardio': ["Keep your pace!", "Breathe!", "Push it!"],
             'yoga': ["Focus on breathing.", "Hold the pose.", "Find your center."],
@@ -187,41 +151,30 @@
             'squat': ["Knees out!", "Chest up!", "Drive through heels!"]
         };
 
-        // Every 10 seconds, provide feedback
         setInterval(function() {
             var msgs = feedbackMessages[exerciseType] || feedbackMessages['pushup'];
             var randomMsg = msgs[Math.floor(Math.random() * msgs.length)];
             
-            statusText.setAttribute('value', randomMsg);
-            
-            var utterance = new SpeechSynthesisUtterance(randomMsg);
-            speechSynthesis.speak(utterance);
+            if(statusText && statusText.getAttribute('value') !== "Click Start" && statusText.getAttribute('value') !== "Session Done!") {
+                 var utterance = new SpeechSynthesisUtterance(randomMsg);
+                 speechSynthesis.speak(utterance);
+            }
         }, 10000);
 
-        // --- SOCKET UPDATES ---
+        // Socket Event Listeners
         socket.on('update_vr', function(data) {
-            if(data.reps !== undefined) {
-                scoreText.setAttribute('value', "Reps: " + data.reps);
+            if(data.reps !== undefined && scoreText) {
+                scoreText.setAttribute('value', "Reps: " + data.reps + " / " + targetReps);
             }
-            if(data.status === "Push Now!" || data.status === "Up!" || data.status === "Squat!" || data.status === "Stand Up!" || data.status === "Jump!" || data.status === "Arms Down!" || data.status === "Reach Up!" || data.status === "Bend Down!") {
+            if(data.status && statusText) {
                 statusText.setAttribute('value', data.status);
             }
         });
-    </script>
 
-    <script>
-        document.querySelector('a-scene').addEventListener('loaded', async () => {
-            const media = document.querySelector('#bg-media');
-
-            // Only wait for user gesture to play if it's a video file
-            if (media && media.tagName.toLowerCase() === 'video') {
-                document.body.addEventListener('click', async () => {
-                    media.muted = true;
-                    await media.play();
-                }, { once: true });
-            }
+        socket.on('play_audio', function(data) {
+            var audio = document.getElementById('snd-' + data.file);
+            if(audio) audio.play();
         });
     </script>
-
 </body>
 </html>
