@@ -6,55 +6,25 @@
     <title>PhysioVR Dashboard</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <style>
+        /* (Keep all your existing CSS exactly the same as before, no changes needed here) */
         * { box-sizing: border-box; } 
-        body { 
-    font-family: 'Segoe UI', sans-serif; 
-    margin: 0;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    color: white;
-    overflow-x: hidden;
-
-    /* Overlay + image combined */
-    background:
-        linear-gradient(rgba(0,0,0,0.45), rgba(0,0,0,0.65)),
-        url('/static/background.jpg');
-    background-position: center;
-    background-size: cover;
-    background-attachment: fixed;
-}
-        .navbar { 
-            padding: 15px 25px; display: flex; justify-content: flex-end; align-items: center;
-            position: sticky; top: 0; z-index: 100; background: rgba(0, 0, 0, 0.25); backdrop-filter: blur(10px);
-        }
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; background: url('/static/background.jpg') no-repeat center center fixed; background-size: cover; color: white; min-height: 100vh; display: flex; flex-direction: column; overflow-x: hidden; }
+        body::before { content: ""; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.92); z-index: -1; }
+        .navbar { padding: 15px 25px; display: flex; justify-content: flex-end; align-items: center; position: sticky; top: 0; z-index: 100; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(10px); }
         .nav-toggle { display: none; }
         .nav-toggle-label { cursor: pointer; display: block; z-index: 110; }
-        .nav-toggle-label span, .nav-toggle-label span::before, .nav-toggle-label span::after {
-            display: block; background: #00d2ff; height: 3px; width: 28px; border-radius: 2px; position: relative; transition: 0.3s;
-        }
+        .nav-toggle-label span, .nav-toggle-label span::before, .nav-toggle-label span::after { display: block; background: #00d2ff; height: 3px; width: 28px; border-radius: 2px; position: relative; transition: 0.3s; }
         .nav-toggle-label span::before { content: ""; position: absolute; bottom: 10px; }
         .nav-toggle-label span::after { content: ""; position: absolute; top: 10px; }
-        .nav-links { 
-            position: fixed; top: 0; right: -100%; width: 100%; height: 100vh;
-            background: rgba(10, 10, 10, 0.98); display: flex; flex-direction: column;
-            justify-content: center; align-items: center; gap: 40px; transition: 0.5s; z-index: 105;
-        }
+        .nav-links { position: fixed; top: 0; right: -100%; width: 100%; height: 100vh; background: rgba(10, 10, 10, 0.98); display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 40px; transition: 0.5s; z-index: 105; }
         .nav-item { color: #ddd; text-decoration: none; font-weight: 600; font-size: 28px; transition: 0.3s; }
         #nav-toggle:checked ~ .nav-links { right: 0; }
         .hero { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 20px; }
         .hero h1 { font-size: 2.5rem; margin-bottom: 20px; text-shadow: 0 0 20px rgba(0, 210, 255, 0.4); }
         .hero p { font-size: 1.1rem; color: #ccc; margin-bottom: 40px; max-width: 500px; }
         .start-btn { background: linear-gradient(135deg, #007bff, #00d2ff); color: white; border: none; padding: 18px 45px; font-size: 18px; font-weight: bold; border-radius: 50px; cursor: pointer; box-shadow: 0 0 20px rgba(0,123,255,0.5); text-transform: uppercase; }
-        
-        .modal-overlay { 
-            display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-            background: rgba(0,0,0,0.75); z-index: 2000; justify-content: center; align-items: center; 
-        }
-        .modal-content { 
-            background: #1e1e1e; padding: 25px; border-radius: 20px; width: 90%; max-width: 500px; 
-            text-align: center; position: relative; border: 1px solid #333; margin: auto;
-        }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.95); z-index: 2000; justify-content: center; align-items: center; }
+        .modal-content { background: #1e1e1e; padding: 25px; border-radius: 20px; width: 90%; max-width: 500px; text-align: center; position: relative; border: 1px solid #333; margin: auto; }
         .close-modal { position: absolute; top: 15px; right: 20px; font-size: 28px; cursor: pointer; color: #888; }
         .grid-options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 20px 0; width: 100%; }
         .option-card { background: #333; border: 2px solid transparent; border-radius: 12px; overflow: hidden; cursor: pointer; transition: 0.3s; width: 100%; }
@@ -64,12 +34,9 @@
         .option-card.selected img { opacity: 1; }
         .next-btn { width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 10px; font-size: 16px; cursor: pointer; opacity: 0.5; pointer-events: none; }
         .next-btn.active { opacity: 1; pointer-events: all; }
-
-        /* --- STYLES FOR STEP 3 --- */
         .rep-control { display: flex; flex-direction: column; gap: 20px; margin: 40px 0; }
         input[type=range] { width: 100%; accent-color: #00d2ff; }
         .rep-display { font-size: 40px; color: #00d2ff; font-weight: bold; }
-
         @media (min-width: 768px) {
             .nav-toggle-label { display: none; }
             .navbar { justify-content: center; padding: 25px; }
@@ -109,7 +76,7 @@
                     <div class="option-card" onclick="selectEnv('beach', this)"><img src="/static/beach.jpg" onerror="this.src='https://via.placeholder.com/150/ff9900/fff?text=Beach'"><span>Beach</span></div>
                     <div class="option-card" onclick="selectEnv('gym', this)"><img src="/static/gym.jpg" onerror="this.src='https://via.placeholder.com/150/333333/fff?text=Gym'"><span>Gym</span></div>
                     <div class="option-card" onclick="selectEnv('garden', this)"><img src="/static/mountain.jpg" onerror="this.src='https://via.placeholder.com/150/4CAF50/fff?text=Mountain'"><span>Mountain</span></div>
-                    <div class="option-card" onclick="selectEnv('cave', this)"><img src="/static/zen.jpg" onerror="this.src='https://via.placeholder.com/150/E91E63/fff?text=Zen'"><span>Zen Room</span></div>
+                    <div class="option-card" onclick="selectEnv('zen', this)"><img src="/static/zen.jpg" onerror="this.src='https://via.placeholder.com/150/E91E63/fff?text=Zen'"><span>Zen Room</span></div>
                 </div>
                 <button id="btn-step-1" class="next-btn" onclick="goToStep(2)">Next</button>
             </div>
@@ -119,19 +86,26 @@
                 <div class="grid-options">
                     <div class="option-card" onclick="selectEx('pushup', this)"><div style="font-size: 30px; padding: 15px;">💪</div><span>Pushups</span></div>
                     <div class="option-card" onclick="selectEx('squat', this)"><div style="font-size: 30px; padding: 15px;">🦵</div><span>Squats</span></div>
-                    <div class="option-card" onclick="selectEx('yoga', this)"><div style="font-size: 30px; padding: 15px;">🧘</div><span>Yoga</span></div>
+                    <div class="option-card" onclick="selectEx('yoga', this)"><div style="font-size: 30px; padding: 15px;">🧘</div><span>Meditation/Yoga</span></div>
                     <div class="option-card" onclick="selectEx('cardio', this)"><div style="font-size: 30px; padding: 15px;">🏃</div><span>Cardio</span></div>
                 </div>
                 <button id="btn-step-2" class="next-btn" onclick="goToStep(3)">Next</button>
             </div>
 
             <div id="step-3" style="display:none;">
-                <div style="font-size: 20px; margin-bottom: 20px; color: #00d2ff;">3. Set Target Reps</div>
-                <div class="rep-control">
-                    <div class="rep-display" id="rep-val">10</div>
-                    <input type="range" id="rep-slider" min="5" max="50" step="5" value="10" oninput="updateReps(this.value)">
+                <div style="font-size: 20px; margin-bottom: 20px; color: #00d2ff;">3. Set Your Goal</div>
+                
+                <div id="rep-control-group" class="rep-control">
+                    <div class="rep-display"><span id="rep-val">10</span> Reps</div>
+                    <input type="range" min="5" max="50" step="5" value="10" oninput="updateTarget(this.value, 'reps')">
                 </div>
-                <p style="color:#aaa; font-size:14px;">The AI will count until you reach this goal.</p>
+
+                <div id="time-control-group" class="rep-control" style="display:none;">
+                    <div class="rep-display"><span id="time-val">5</span> Mins</div>
+                    <input type="range" min="1" max="30" step="1" value="5" oninput="updateTarget(this.value, 'time')">
+                </div>
+
+                <p id="step-3-desc" style="color:#aaa; font-size:14px;">The AI will track your progress until you reach this goal.</p>
                 <button id="btn-step-3" class="next-btn active" onclick="startVR()">ENTER VR</button>
             </div>
 
@@ -141,7 +115,9 @@
     <script>
         let selectedEnv = null;
         let selectedEx = null;
+        let workoutMode = 'reps'; 
         let targetReps = 10;
+        let targetMins = 5;
 
         function openModal() { document.getElementById('selectionModal').style.display = 'flex'; }
         function closeModal() { document.getElementById('selectionModal').style.display = 'none'; }
@@ -155,6 +131,9 @@
 
         function selectEx(exId, el) {
             selectedEx = exId;
+            // Switch mode if Yoga/Meditation is selected
+            workoutMode = (exId === 'yoga') ? 'time' : 'reps';
+
             document.querySelectorAll('#step-2 .option-card').forEach(c => c.classList.remove('selected'));
             el.classList.add('selected');
             document.getElementById('btn-step-2').classList.add('active');
@@ -165,17 +144,34 @@
             document.getElementById('step-2').style.display = 'none';
             document.getElementById('step-3').style.display = 'none';
             document.getElementById('step-' + stepNum).style.display = 'block';
+
+            if (stepNum === 3) {
+                if (workoutMode === 'time') {
+                    document.getElementById('rep-control-group').style.display = 'none';
+                    document.getElementById('time-control-group').style.display = 'flex';
+                    document.getElementById('step-3-desc').innerText = "Focus on breathing. The AI will guide you for this duration.";
+                } else {
+                    document.getElementById('rep-control-group').style.display = 'flex';
+                    document.getElementById('time-control-group').style.display = 'none';
+                    document.getElementById('step-3-desc').innerText = "The AI will count your movements until you hit this target.";
+                }
+            }
         }
 
-        function updateReps(val) {
-            targetReps = val;
-            document.getElementById('rep-val').innerText = val;
+        function updateTarget(val, mode) {
+            if (mode === 'reps') {
+                targetReps = val;
+                document.getElementById('rep-val').innerText = val;
+            } else {
+                targetMins = val;
+                document.getElementById('time-val').innerText = val;
+            }
         }
 
         function startVR() {
             if(selectedEnv && selectedEx) {
-                // Pass the target reps in the URL
-                window.location.href = `/vr?env=${selectedEnv}&ex=${selectedEx}&target=${targetReps}`;
+                let finalTarget = (workoutMode === 'time') ? targetMins : targetReps;
+                window.location.href = `/vr?env=${selectedEnv}&ex=${selectedEx}&target=${finalTarget}&mode=${workoutMode}`;
             }
         }
     </script>

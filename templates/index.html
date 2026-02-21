@@ -48,18 +48,68 @@
 
     <a-scene vr-mode-ui="enabled: true" xr-mode-ui="enabled: true" device-orientation-permission-ui="enabled: false" renderer="antialias: true; colorManagement: true;">
         
+        {% if env == 'gym' %}
+                <img id="bg-media" src="/static/gym.png">
+                {% set avatar_pos = "0 0 -5" %}
+                {% set avatar_rotation = "0 -45 0" %}
+                
+                {% if model_filename == 'pushup_avatar' %}
+                    {% set avatar_scale = "1.5 1.5 1.5" %}
+                {% elif model_filename == 'pistol_squads' %}
+                    {% set avatar_scale = "1.2 1.2 1.2" %}
+                {% elif model_filename == 'meditation' %}
+                    {% set avatar_scale = "2.2 2.2 2.2" %}
+                {% elif model_filename == 'Surya_namaskar' %}
+                    {% set avatar_scale = "2.2 2.2 2.2" %}
+                {% else %} {% set avatar_scale = "2.2 2.2 2.2" %}   
+                {% endif %}
+
+                {% elif env == 'garden' %} 
+                <video id="bg-media" src="/static/garden.mov" preload="metadata" muted loop playsinline webkit-playsinline crossorigin="anonymous"></video>
+                {% set avatar_pos = "6 -1 -3" %}
+                
+
+                {% if model_filename == 'pushup_avatar' %}
+                    {% set avatar_scale = "1 1 1" %}
+                    {% set avatar_rotation = "0 0 0" %}
+                {% elif model_filename == 'pistol_squads' %}
+                    {% set avatar_scale = "1 1 1" %}
+                    {% set avatar_rotation = "0 0 0" %}
+                {% elif model_filename == 'meditation' %}
+                    {% set avatar_scale = "2.5 2.5 2.5" %}
+                    {% set avatar_rotation = "0 -85 0" %}
+                {% elif model_filename == 'Surya_namaskar' %}
+                    {% set avatar_scale = "2.5 2.5 2.5" %}
+                    {% set avatar_rotation = "0 0 0" %}
+                {% else %} {% set avatar_scale = " 2 2 2" %}  
+                    {% set avatar_rotation = "0 0 0" %} 
+                {% endif %}
+
+            {% else %}
+                <video id="bg-media" src="/static/cave.mp4" preload="metadata" muted loop playsinline webkit-playsinline crossorigin="anonymous"></video>
+                {% set avatar_pos = "-7 0 -7" %}
+
+                {% if model_filename == 'pushup_avatar' %}
+                    {% set avatar_scale = "1 1 1" %}
+                    {% set avatar_rotation = "0 0 0" %}
+                {% elif model_filename == 'pistol_squads' %}
+                    {% set avatar_scale = "0.7 0.7 0.7" %}
+                    {% set avatar_rotation = "0 0 0" %}
+                {% elif model_filename == 'meditation' %}
+                    {% set avatar_scale = "2 2 2" %}
+                    {% set avatar_rotation = "0 50 0" %}
+                {% elif model_filename == 'Surya_namaskar' %}
+                    {% set avatar_scale = "2 2 2" %}
+                    {% set avatar_rotation = "0 0 0" %}
+                {% else %} {% set avatar_scale = "2 2 2" %}   
+                    {% set avatar_rotation = "0 0 0" %}
+                {% endif %}
+        
+            {% endif %}
+
         <a-assets>
             <audio id="snd-good" src="/static/good.mp3"></audio>
-            
             <a-asset-item id="avatar-model" src="/static/{{ model_filename }}.glb"></a-asset-item>
-
-            {% if env == 'gym' %}
-                <img id="bg-media" src="/static/gym.png">
-            {% elif env == 'garden' %} 
-                <video id="bg-media" src="/static/garden.mov" preload="metadata" muted loop playsinline webkit-playsinline crossorigin="anonymous"></video>
-            {% else %}
-                <video id="bg-media" src="/static/{{ env }}.mp4" preload="metadata" muted loop playsinline webkit-playsinline crossorigin="anonymous"></video>
-            {% endif %}
         </a-assets>
 
         {% if env == 'gym' %}
@@ -73,16 +123,16 @@
 
         <a-entity id="rig" position="0 1.6 0"> 
             <a-entity id="head" camera="fov: 90" look-controls="magicWindowTrackingEnabled: false; touchEnabled: true">
-                 <a-text id="score-text" value="Reps: 0 / {{ request.args.get('target', 10) }}" position="-0.4 0.4 -1" color="white" width="1.8" font="exo2bold"></a-text>
+                 <a-text id="score-text" value="Ready" position="-0.4 0.4 -1" color="white" width="1.8" font="exo2bold"></a-text>
                  <a-text id="status-text" value="Click Start" position="0.1 0.4 -1" color="#00d2ff" width="1.8" font="exo2bold"></a-text>
             </a-entity>
         </a-entity>
 
         <a-entity 
             gltf-model="#avatar-model" 
-            position="1 0 0" 
-            rotation="0 -45 0" 
-            scale="1 1 1"
+            position="{{ avatar_pos }}" 
+            rotation="{{ avatar_rotation }}" 
+            scale="{{ avatar_scale }}"
             animation-mixer="clip: *; loop: repeat; timeScale: 1">
         </a-entity>
 
@@ -93,16 +143,24 @@
     <script>
         var socket = io();
         const urlParams = new URLSearchParams(window.location.search);
-        const targetReps = urlParams.get('target') || 10;
+        
+        // YOUR UPDATED LOGIC FOR TARGET/MODE
+        const targetVal = urlParams.get('target') || 10;
         const exerciseType = urlParams.get('ex') || 'pushup';
+        const workoutMode = urlParams.get('mode') || 'reps'; 
         
         var scoreText = document.querySelector('#score-text');
         var statusText = document.querySelector('#status-text');
 
-        // Dynamically update the button text
-        document.getElementById('vrbtn').innerText = "START WORKOUT (Target: " + targetReps + ")";
+        // Setup Button and Text based on Mode
+        if (workoutMode === 'time') {
+            document.getElementById('vrbtn').innerText = "START MEDITATION (" + targetVal + " Mins)";
+            scoreText.setAttribute('value', "Target: " + targetVal + " Mins");
+        } else {
+            document.getElementById('vrbtn').innerText = "START WORKOUT (Target: " + targetVal + ")";
+            scoreText.setAttribute('value', "Reps: 0 / " + targetVal);
+        }
 
-        // Click handler to enter VR mode
         async function enableVR() {
             if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
                 await DeviceOrientationEvent.requestPermission();
@@ -110,28 +168,25 @@
             document.querySelector("a-scene").enterVR();
         }
 
-        // Wait for A-Frame to actually enter VR mode before starting
         let workoutStarted = false;
         document.querySelector('a-scene').addEventListener('enter-vr', async function () {
             if (!workoutStarted) {
                 document.getElementById('vrbtn').style.display = 'none';
                 
-                // Play video if applicable
                 const media = document.querySelector("#bg-media");
                 if (media && media.tagName.toLowerCase() === 'video') {
                     media.muted = true;
                     try { await media.play(); } catch(e) {}
                 }
 
-                // Tell Python to start tracking
-                socket.emit('start_workout', { target: targetReps });
+                // Send both Target AND Mode to Python
+                socket.emit('start_workout', { target: targetVal, mode: workoutMode });
                 
                 startTimer();
                 workoutStarted = true;
             }
         });
 
-        // Local Timer
         function startTimer() {
             var elapsed = 0;
             var timerDisplay = document.getElementById('timer-display');
@@ -139,14 +194,13 @@
                 elapsed++;
                 var minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
                 var seconds = (elapsed % 60).toString().padStart(2, '0');
-                timerDisplay.innerText = "Time: " + minutes + ":" + seconds;
+                timerDisplay.innerText = "Session Time: " + minutes + ":" + seconds;
             }, 1000);
         }
 
-        // Feedback Logic
         const feedbackMessages = {
             'cardio': ["Keep your pace!", "Breathe!", "Push it!"],
-            'yoga': ["Focus on breathing.", "Hold the pose.", "Find your center."],
+            'yoga': ["Focus on breathing.", "Clear your mind.", "Find your center."], // Changed for meditation
             'pushup': ["Keep back straight!", "Lower chest to floor!", "Great form!"],
             'squat': ["Knees out!", "Chest up!", "Drive through heels!"]
         };
@@ -161,10 +215,10 @@
             }
         }, 10000);
 
-        // Socket Event Listeners
+        // Python now controls exactly what the score text says (e.g. "Time Left: 2:30" or "Reps: 4/10")
         socket.on('update_vr', function(data) {
-            if(data.reps !== undefined && scoreText) {
-                scoreText.setAttribute('value', "Reps: " + data.reps + " / " + targetReps);
+            if(data.score_text && scoreText) {
+                scoreText.setAttribute('value', data.score_text);
             }
             if(data.status && statusText) {
                 statusText.setAttribute('value', data.status);
