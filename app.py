@@ -269,6 +269,8 @@ def register_page(): return render_template('register.html')
 def dashboard(): return render_template('dashboard.html')
 @app.route('/coach')
 def coach(): return render_template('coach.html')
+@app.route('/about')
+def about(): return render_template('about.html')
 
 @app.route('/register', methods=['POST'])
 def register():
@@ -320,6 +322,31 @@ def api_dashboard_data():
         sessions = [{'date': r.get('date').strftime('%Y-%m-%d') if r.get('date') else None, 'exercise_name': r.get('exercise_name'), 'duration': int(r.get('duration') or 0), 'reps': int(r.get('reps') or 0), 'fatigue': r.get('fatigue')} for r in cursor.fetchall()]
         return jsonify({'total_exercise_time': int(agg.get('total_exercise_time') or 0), 'total_vr_time': int(agg.get('total_vr_time') or 0), 'total_reps': int(agg.get('total_reps') or 0), 'avg_fatigue': float(agg['avg_fatigue']) if agg.get('avg_fatigue') is not None else None, 'sessions': sessions})
     except: return jsonify({'total_exercise_time': 0, 'total_vr_time': 0, 'total_reps': 0, 'avg_fatigue': None, 'sessions': []})
+
+@app.route('/api/ai/day-analysis', methods=['POST'])
+@login_required
+def api_ai_day_analysis():
+    try:
+        from datetime import datetime, timedelta
+        conn = mysql_helper.get_mysql_connection()
+        cursor = conn.cursor(dictionary=True)
+        today = datetime.now().date()
+        cursor.execute("SELECT exercise_name, duration, reps, fatigue FROM sessions WHERE user_id = %s AND DATE(created_at) = %s ORDER BY created_at", (request.user_id, today))
+        sessions = cursor.fetchall()
+        if not sessions:
+            return jsonify({'analysis': 'No sessions recorded today. Start your first session to get AI feedback!'}), 200
+        sessions_text = '\n'.join([f"- {s['exercise_name']}: {s['duration']}s, {s['reps']} reps, Fatigue: {s['fatigue']}" for s in sessions])
+        prompt = f"""Analyze this user's workout session for today and provide motivational, constructive feedback. Keep it concise (2-3 sentences).
+
+Today's Sessions:
+{sessions_text}
+
+Provide insights on their performance, energy levels (fatigue), and suggestions for improvement."""
+        response = client.chat.completions.create(model="llama-3.1-8b-instant", messages=[{"role": "user", "content": prompt}], max_tokens=300)
+        analysis = response.choices[0].message.content
+        return jsonify({'analysis': analysis}), 200
+    except Exception as e:
+        return jsonify({'error': f'AI analysis unavailable: {str(e)}'}), 500
 
 @app.route('/vr')
 def vr_session():
