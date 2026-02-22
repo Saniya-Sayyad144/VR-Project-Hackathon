@@ -34,7 +34,7 @@
 
     <div class="session-overlay">
         <div class="session-info" id="timer-display">Ready?</div>
-        <a href="/" class="exit-btn">EXIT SESSION</a>
+        <a href="javascript:void(0)" onclick="exitWorkout()" class="exit-btn">EXIT SESSION</a>
     </div>
 
     <button id="vrbtn" onclick="enableVR()"
@@ -133,6 +133,7 @@
         </a-entity>
 
         <a-entity 
+            id="avatar-entity"
             gltf-model="#avatar-model" 
             position="{{ avatar_pos }}" 
             rotation="{{ avatar_rotation }}" 
@@ -140,7 +141,7 @@
             animation-mixer="clip: *; loop: repeat; timeScale: 1">
         </a-entity>
 
-        <a-text value="AI TRAINER" position="1 1.4 0" color="#00FFFF" align="center" width="3" font="exo2bold"></a-text>
+        <a-text id="ai-trainer-text" value="AI TRAINER" position="1 1.4 0" color="#00FFFF" align="center" width="3" font="exo2bold"></a-text>
 
     </a-scene>
 
@@ -158,10 +159,24 @@
         var bgMusic = document.getElementById('bg-music'); 
         var fatigueHud = document.querySelector('#fatigue-hud');
         var fatigueScreen = document.querySelector('#fatigue-red-screen');
+        var avatarEntity = document.getElementById('avatar-entity');
+        var aiTrainerText = document.getElementById('ai-trainer-text');
 
         if (workoutMode === 'time') {
             document.getElementById('vrbtn').innerText = "START MEDITATION (" + targetVal + " Mins)";
             scoreText.setAttribute('value', "Target: " + targetVal + " Mins");
+            
+            // --- MEDITATION MODE: Hide Distractions ---
+            if (statusText) statusText.setAttribute('visible', 'false');
+            if (avatarEntity) avatarEntity.setAttribute('visible', 'false');
+            if (aiTrainerText) aiTrainerText.setAttribute('visible', 'false');
+            if (fatigueHud) fatigueHud.setAttribute('visible', 'false');
+            if (fatigueScreen) fatigueScreen.setAttribute('visible', 'false');
+            
+            // Center the timer text in vision
+            scoreText.setAttribute('position', '0 0.8 -2');
+            scoreText.setAttribute('align', 'center');
+            scoreText.setAttribute('width', '3.6'); // Match the double-vision fix scaling
         } else {
             document.getElementById('vrbtn').innerText = "START WORKOUT (Target: " + targetVal + ")";
             scoreText.setAttribute('value', "Reps: 0 / " + targetVal);
@@ -217,7 +232,26 @@
             'squat': ["Knees out!", "Chest up!", "Drive through heels!"]
         };
 
+        // Exit workout handler - save session before exiting
+        async function exitWorkout() {
+            if(workoutStarted && !sessionSaved) {
+                var scoreValue = scoreText.getAttribute('value') || 'Reps: 0 / 10';
+                var repsMatch = scoreValue.match(/^Reps:\s*(\d+)/);
+                finalReps = repsMatch ? parseInt(repsMatch[1]) : 0;
+                var duration = Math.floor((Date.now() - workoutStartTime) / 1000);
+                await saveSession(exerciseType, finalReps, duration);
+            } else if(sessionSaved) {
+                // Already saved, just redirect
+                window.location.href = '/dashboard';
+            } else {
+                // Workout not started, go back to home
+                window.location.href = '/';
+            }
+        }
+
         setInterval(function() {
+            if (workoutMode === 'time') return; // --- MUTE VOICE COACH DURING MEDITATION ---
+            
             var msgs = feedbackMessages[exerciseType] || feedbackMessages['pushup'];
             var randomMsg = msgs[Math.floor(Math.random() * msgs.length)];
             
@@ -227,30 +261,26 @@
             }
         }, 10000);
 
-        // --- NEW: Client-side Fatigue Smoothing ---
         let displayOpacity = 0.0; // Gradually tracks target opacity
         
         socket.on('update_vr', function(data) {
             if(data.score_text && scoreText) {
                 scoreText.setAttribute('value', data.score_text);
             }
+            // Let it update in background for the auto-exit tracker to catch, but don't show it
             if(data.status && statusText) {
                 statusText.setAttribute('value', data.status);
             }
             
-            // Handle Smooth Fatigue Visuals
-            if(data.fatigue_score !== undefined) {
-                // Determine target opacity based on fatigue score (e.g. over 60 starts turning red)
+            // Handle Smooth Fatigue Visuals (ONLY if not in meditation mode)
+            if(workoutMode !== 'time' && data.fatigue_score !== undefined) {
                 let targetOpacity = 0.0;
                 if (data.fatigue_score > 60.0) {
-                    // Map score 60-100 to opacity 0.1-0.5
                     targetOpacity = Math.min(((data.fatigue_score - 60) / 40) * 0.5, 0.5); 
                 }
                 
-                // Smoothly ease the current displayOpacity toward the target
-                displayOpacity += (targetOpacity - displayOpacity) * 0.1; // 0.1 controls the speed of the fade
+                displayOpacity += (targetOpacity - displayOpacity) * 0.1; 
                 
-                // Only show warning text if fatigue is very high (e.g. > 75)
                 if (data.fatigue_score > 75.0) {
                     fatigueHud.setAttribute('visible', 'true');
                     fatigueHud.setAttribute('value', data.fatigue_text);
@@ -258,10 +288,15 @@
                     fatigueHud.setAttribute('visible', 'false');
                 }
                 
-                // Apply the smoothed opacity
                 fatigueScreen.setAttribute('material', 'opacity: ' + displayOpacity.toFixed(2));
             }
         });
+
+        // Track workout state for session saving
+        let workoutEndTime = 0;
+        let workoutStartTime = Date.now();
+        let finalReps = 0;
+        let sessionSaved = false;
 
         socket.on('play_audio', function(data) {
             var audio = document.getElementById('snd-' + data.file);
@@ -270,6 +305,62 @@
                 audio.play();
             }
         });
+
+        // Detect workout completion and trigger save + redirect
+        setInterval(function() {
+            if(!sessionSaved && statusText) {
+                var status = statusText.getAttribute('value') || '';
+                
+                // Check if workout ended
+                if(status.includes('Session Done!') || status.includes('Goal Reached!') || status.includes('Meditation Complete!')) {
+                    workoutEndTime = Date.now();
+                    
+                    var scoreValue = scoreText.getAttribute('value') || 'Reps: 0 / 10';
+                    var repsMatch = scoreValue.match(/^Reps:\s*(\d+)/);
+                    finalReps = repsMatch ? parseInt(repsMatch[1]) : 0;
+                    
+                    var duration = Math.floor((workoutEndTime - workoutStartTime) / 1000);
+                    
+                    // Save session to database
+                    saveSession(exerciseType, finalReps, duration);
+                    sessionSaved = true;
+                }
+            }
+        }, 1000);
+
+        async function saveSession(exercise, reps, duration) {
+            try {
+                const response = await fetch('/api/save-session', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        exercise: exercise,
+                        reps: reps,
+                        duration: duration,
+                        fatigue: 0.0
+                    })
+                });
+                
+                if(response.ok) {
+                    console.log('Session saved successfully');
+                    
+                    // Auto-exit VR before redirecting
+                    let scene = document.querySelector("a-scene");
+                    if (scene && scene.is('vr-mode')) {
+                        scene.exitVR();
+                    }
+                    
+                    setTimeout(function() {
+                        window.location.href = '/dashboard';
+                    }, 2000);
+                } else {
+                    console.log('Failed to save session');
+                }
+            } catch(e) {
+                console.log('Error saving session:', e);
+            }
+        }
     </script>
     <script src="/static/auth-check.js"></script>
 </body>

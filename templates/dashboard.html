@@ -1,92 +1,14 @@
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Dashboard</title>
-  <style>
-    body{font-family:Arial,Helvetica,sans-serif;margin:0;padding:0}
-    .container{padding:16px;max-width:1000px;margin:0 auto}
-    .cards{display:flex;flex-wrap:wrap;gap:12px;margin:12px 0}
-    .card{flex:1 1 200px;background:#f7f7f7;padding:12px;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
-    table{width:100%;border-collapse:collapse;margin-top:12px}
-    th,td{padding:8px;border-bottom:1px solid #eee;text-align:left}
-    .toolbar{display:flex;gap:8px;align-items:center;margin-top:12px}
-    button{padding:8px 12px;border-radius:6px;border:1px solid #ccc;background:#fff;cursor:pointer}
-    .busy{opacity:0.6}
-    @media(max-width:700px){.cards{flex-direction:column}}
-  </style>
-</head>
-<body>
-  {% include '_navbar_loggedin.html' %}
-  <div class="container">
-    <h2>My Dashboard</h2>
-    <div class="cards" id="cards">
-      <div class="card"><strong>Total Exercise Time</strong><div id="total_exercise_time">-</div></div>
-      <div class="card"><strong>Total VR Time</strong><div id="total_vr_time">-</div></div>
-      <div class="card"><strong>Total Reps</strong><div id="total_reps">-</div></div>
-      <div class="card"><strong>Average Fatigue</strong><div id="avg_fatigue">-</div></div>
-    </div>
-
-    <div class="toolbar">
-      <button id="refreshBtn">Refresh</button>
-      <button id="downloadBtn">Download Today Report</button>
-      <button id="analyzeBtn">Analyze My Day</button>
-      <span id="status" style="margin-left:8px;color:#666"></span>
-    </div>
-
-    <h3>Recent Sessions</h3>
-    <table>
-      <thead><tr><th>Date</th><th>Exercise</th><th>Duration (s)</th><th>Reps</th><th>Fatigue</th></tr></thead>
-      <tbody id="sessionsTable"><tr><td colspan="5">Loading...</td></tr></tbody>
-    </table>
-  </div>
-
-  <!-- AI Modal -->
-  <div id="aiModal" style="display:none;position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(0,0,0,0.5);align-items:center;justify-content:center;">
-    <div style="background:#fff;padding:16px;border-radius:6px;max-width:700px;margin:20px auto;">
-      <h3>AI Analysis</h3>
-      <div id="aiResult">...</div>
-      <div style="text-align:right;margin-top:12px;"><button id="closeAi">Close</button></div>
-    </div>
-  </div>
-
-  <script src="/static/dashboard.js"></script>
-</body>
-</html>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard - PhysioVR</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Dashboard</title>
     <style>
-        body {
-            font-family: 'Segoe UI', sans-serif;
-            background: #0f172a;
-            color: #fff;
-            margin: 0;
-            background-image: radial-gradient(circle at 50% 50%, #1e293b 0%, #0f172a 100%);
-            min-height: 100vh;
-        }
-
-        /* NAVBAR */
-        .navbar {
-            padding: 20px 40px; display: flex; justify-content: space-between; align-items: center;
-            background: rgba(15, 23, 42, 0.9); backdrop-filter: blur(10px);
-            border-bottom: 1px solid rgba(255,255,255,0.1); position: sticky; top: 0; z-index: 100;
-        }
-        .nav-brand { font-size: 24px; font-weight: bold; color: #00d2ff; text-decoration: none; }
-        .nav-links { display: flex; gap: 30px; }
-        .nav-item { color: #ddd; text-decoration: none; font-weight: 500; font-size: 18px; transition: 0.3s; }
-        .nav-item:hover { color: #00d2ff; }
-
-        /* CONTAINER */
-        .container { max-width: 1000px; margin: 40px auto; padding: 0 20px; }
-        h1 { font-size: 2.5rem; color: #00d2ff; border-bottom: 2px solid rgba(0, 210, 255, 0.3); padding-bottom: 10px; }
-
-        /* HISTORY CARDS */
+        body{font-family:Arial,Helvetica,sans-serif;margin:0;padding:0;background:#0f172a;color:#fff;}
+        .container{padding:16px;max-width:1000px;margin:0 auto}
+        .cards{display:flex;flex-wrap:wrap;gap:12px;margin:12px 0}
+        .card{flex:1 1 200px;background:#1e293b;padding:12px;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,0.08);color:#fff;}
         .history-card {
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.1);
@@ -99,22 +21,31 @@
             transition: 0.3s;
         }
         .history-card:hover { border-color: #00d2ff; box-shadow: 0 0 15px rgba(0, 210, 255, 0.2); transform: translateY(-2px); }
-        
         .details h3 { margin: 0 0 5px 0; font-size: 20px; color: #fff; }
         .details p { margin: 5px 0; color: #aaa; font-size: 14px; }
         .fatigue-badge { 
             display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; margin-top: 5px;
             background: rgba(255, 153, 0, 0.2); color: #ffaa00; border: 1px solid #ffaa00;
         }
-
+        table{width:100%;border-collapse:collapse;margin-top:12px;background:#1e293b;color:#fff;}
+        th,td{padding:8px;border-bottom:1px solid #334155;text-align:left}
+        .toolbar{display:flex;gap:8px;align-items:center;margin-top:12px}
+        button{padding:8px 12px;border-radius:6px;border:none;background:#00d2ff;color:#fff;cursor:pointer;font-weight:bold;}
+        button:hover{background:#0090c0;}
         .download-btn {
             background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 8px;
             cursor: pointer; font-weight: bold; transition: 0.2s;
         }
         .download-btn:hover { background: #0056b3; }
-        
+        .busy{opacity:0.6}
         .empty-state { text-align: center; color: #888; padding: 50px; font-size: 18px; }
-
+        @media(max-width:700px){.cards{flex-direction:column}}
+        .navbar{padding:20px 40px;display:flex;justify-content:space-between;align-items:center;background:rgba(15,23,42,0.9);border-bottom:1px solid rgba(255,255,255,0.1);}
+        .nav-brand{font-size:24px;font-weight:bold;color:#00d2ff;text-decoration:none;}
+        .nav-links{display:flex;gap:30px;}
+        .nav-item{color:#ddd;text-decoration:none;font-weight:500;font-size:18px;}
+        .nav-item.active{color:#00d2ff;}
+        .nav-item:hover{color:#00d2ff;}
         /* Mobile Adjustments */
         @media (max-width: 768px) {
             .navbar { flex-direction: column; gap: 15px; padding: 15px; }
@@ -124,53 +55,66 @@
     </style>
 </head>
 <body>
-
     <div class="navbar">
         <a href="/" class="nav-brand">PhysioVR</a>
         <div class="nav-links">
             <a href="/" class="nav-item">Home</a>
-            <a href="/dashboard" class="nav-item" style="color: #00d2ff;">Dashboard</a>
+            <a href="/dashboard" class="nav-item active">Dashboard</a>
             <a href="/coach" class="nav-item">AI Coach</a>
             <a href="/about" class="nav-item">About</a>
         </div>
     </div>
-
     <div class="container">
         <h1>Patient History</h1>
-
-        {% if history|length == 0 %}
-            <div class="empty-state">No workout history found yet. Complete a VR session to see your stats!</div>
-        {% else %}
-            {% for record in history %}
-            <div class="history-card">
-                <div class="details">
-                    <h3>{{ record.exercise }}</h3>
-                    <p>📅 {{ record.date }} at {{ record.time }}</p>
-                    <p>🎯 Performance: <strong>{{ record.performance }}</strong></p>
-                    <span class="fatigue-badge">Fatigue: {{ record.fatigue }}</span>
-                </div>
-                <button class="download-btn" onclick="downloadPDF('{{ record.date }}', '{{ record.time }}', '{{ record.exercise }}', '{{ record.performance }}', '{{ record.fatigue }}')">
-                    📄 Download PDF
-                </button>
-            </div>
-            {% endfor %}
-        {% endif %}
+        <div class="cards" id="cards">
+            <div class="card"><strong>Total Exercise Time</strong><div id="total_exercise_time">-</div></div>
+            <div class="card"><strong>Total VR Time</strong><div id="total_vr_time">-</div></div>
+            <div class="card"><strong>Total Reps</strong><div id="total_reps">-</div></div>
+            <div class="card"><strong>Average Fatigue</strong><div id="avg_fatigue">-</div></div>
+        </div>
+        <div class="toolbar">
+            <button id="refreshBtn">Refresh</button>
+            <button id="downloadBtn">Download Today Report</button>
+            <button id="analyzeBtn">Analyze My Day</button>
+            <span id="status" style="margin-left:8px;color:#00d2ff"></span>
+        </div>
+        <h3>Recent Sessions</h3>
+        <table>
+            <thead><tr><th>Date</th><th>Exercise</th><th>Duration (s)</th><th>Reps</th><th>Fatigue</th></tr></thead>
+            <tbody id="sessionsTable"><tr><td colspan="5">Loading sessions...</td></tr></tbody>
+        </table>
     </div>
 
+    <!-- AI Modal -->
+    <div id="aiModal" style="display:none;position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(0,0,0,0.5);align-items:center;justify-content:center;z-index:2000;">
+        <div style="background:#1e293b;padding:20px;border-radius:10px;max-width:600px;width:90%;color:#fff;border:1px solid #334155;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">
+                <h3 style="margin:0;color:#00d2ff;">AI Analysis</h3>
+                <button id="closeAi" style="background:none;border:none;font-size:24px;color:#00d2ff;cursor:pointer;">×</button>
+            </div>
+            <div id="aiResult" style="max-height:400px;overflow-y:auto;padding:10px;background:rgba(0,0,0,0.2);border-radius:5px;min-height:50px;">Loading...</div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="/static/dashboard.js"></script>
     <script>
+        // Load data on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            fetchData();
+        });
+
         function downloadPDF(date, time, exercise, performance, fatigue) {
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
-            
             // Header
             doc.setFontSize(22);
             doc.setTextColor(0, 123, 255);
             doc.text("PhysioVR - Session Report", 20, 20);
-            
             // Line
             doc.setDrawColor(200, 200, 200);
             doc.line(20, 25, 190, 25);
-            
             // Content
             doc.setFontSize(14);
             doc.setTextColor(50, 50, 50);
@@ -178,17 +122,14 @@
             doc.text(`Time: ${time}`, 20, 50);
             doc.text(`Exercise Type: ${exercise}`, 20, 60);
             doc.text(`Performance / Target: ${performance}`, 20, 70);
-            
             // Fatigue styling
             if(fatigue.includes('High')) doc.setTextColor(255, 0, 0); // Red
             else doc.setTextColor(0, 150, 0); // Green
             doc.text(`Fatigue Detection: ${fatigue}`, 20, 80);
-            
             // Footer
             doc.setFontSize(10);
             doc.setTextColor(150, 150, 150);
             doc.text("Generated securely by PhysioVR AI.", 20, 280);
-            
             // Save file
             doc.save(`PhysioVR_Report_${date}_${exercise}.pdf`);
         }
