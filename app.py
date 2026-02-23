@@ -3,14 +3,13 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import time
-from collections import deque
-from functools import wraps
 from flask import Flask, render_template, request, jsonify, redirect
 from flask_socketio import SocketIO, emit
 from threading import Thread
 from openai import OpenAI 
 from dotenv import load_dotenv
 
+import exercise_logic 
 import mysql_helper
 import bcrypt
 import jwt
@@ -19,11 +18,8 @@ from login_required import login_required
 
 load_dotenv()
 
-# --- CONFIGURATION ---
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv("FLASK_SECRET_KEY", "dev_secret")
-JWT_SECRET = app.config['SECRET_KEY']
-JWT_ALGORITHM = 'HS256'
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 client = OpenAI(
@@ -31,26 +27,25 @@ client = OpenAI(
     api_key=os.getenv("GROQ_API_KEY")
 )
 
-# --- MEDIAPIPE INITIALIZATION (From Friend's Code) ---
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh    = mp_face_mesh.FaceMesh(refine_landmarks=True, min_detection_confidence=0.5, min_tracking_confidence=0.5)
-
 mp_pose    = mp.solutions.pose
-pose       = mp_pose.Pose(static_image_mode=False, model_complexity=1, enable_segmentation=False, min_detection_confidence=0.5, min_tracking_confidence=0.5)
+pose       = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 mp_drawing = mp.solutions.drawing_utils
 
 POSE_DRAW_SPEC = mp_drawing.DrawingSpec(color=(200, 200, 200), thickness=2, circle_radius=3)
 POSE_CONN_SPEC = mp_drawing.DrawingSpec(color=(160, 160, 160), thickness=2)
 
-# --- VR STATE MEMORY ---
+# --- 3-STATE SYSTEM TO FIX REDIRECT BUG ---
+session_status = 'idle' # Can be 'idle', 'active', or 'completed'
 active_exercise = "pushup"
-is_workout_active = False
 workout_mode = 'reps'  
 target_reps = 10
 start_time = 0
 target_duration = 0 
+exercise_state = {}
 
-# --- FRIEND'S GLOBAL TRACKING VARIABLES ---
+# --- FRIEND'S GLOBAL COGNITIVE VARIABLES ---
 EAR_THRESHOLD      = 0.23
 BLINK_MIN_DURATION = 0.1
 BLINK_MAX_DURATION = 0.4
@@ -59,27 +54,6 @@ CHIN_INDEX         = 152
 LEFT_EYE           = [33, 160, 158, 133, 153, 144]
 RIGHT_EYE          = [362, 385, 387, 263, 373, 380]
 HEAD_DROP_COG      = 70
-
-CALIB_REPS_NEEDED        = 2 # Reduced to 2 so it starts tracking faster
-SQUAT_KNEE_COLLAPSE_DEG  = 25
-SQUAT_KNEE_COLLAPSE_SECS = 0.2
-SQUAT_HIP_DROP_PX        = 30
-SQUAT_VEL_DECAY_RATIO    = 0.40
-SQUAT_EXTENSION_RATIO    = 0.90
-SQUAT_EXTENSION_REPS     = 2
-SQUAT_BALANCE_MULTIPLIER = 2.5
-SURYA_TRANSITION_SLOW_RATIO = 1.50
-SURYA_HIP_SAG_PX         = 40
-SURYA_KNEE_DROP_DEG      = 30
-SURYA_PAUSE_VELOCITY     = 3.5
-SURYA_PAUSE_SECS         = 4.0
-SURYA_SPEED_DEGRADE_RATIO = 0.35
-MIN_CONDITIONS_FOR_FATIGUE = 2
-FI_INCREMENT_PER_CONDITION = 8.0
-FI_DECAY_PER_FRAME         = 0.15
-FI_SMOOTHING_ALPHA         = 0.08
-VEL_WINDOW                 = 25
-HIP_X_HISTORY_WINDOW       = 30
 
 class C:
     BG_DARK        = (30,  30,  30)    
@@ -90,7 +64,6 @@ class C:
     BG_STATUS_CRIT = (255, 230, 230)   
     TEXT_DARK      = (30,  30,  30)    
     TEXT_MED       = (80,  80,  80)    
-    TEXT_LIGHT     = (200, 200, 200)   
     TEXT_ACCENT    = (0,   120, 200)   
     OK             = (34,  139, 34)    
     WARN           = (0,   140, 255)   
@@ -107,10 +80,10 @@ class C:
 FONT = cv2.FONT_HERSHEY_DUPLEX
 FONT_MONO = cv2.FONT_HERSHEY_SIMPLEX
 
-# --- FRIEND'S UI HELPERS ---
+# --- FRIEND'S UI DRAWING FUNCTIONS ---
 def txt(frame, text, x, y, color=C.TEXT_DARK, scale=0.52, thick=1, font=FONT):
     cv2.putText(frame, text, (x, y), font, scale, color, thick, cv2.LINE_AA)
-def panel(frame, x1, y1, x2, y2, bg=C.BG_PANEL, border=C.PANEL_BORDER, radius=6):
+def panel(frame, x1, y1, x2, y2, bg=C.BG_PANEL, border=C.PANEL_BORDER):
     cv2.rectangle(frame, (x1, y1), (x2, y2), bg, -1)
     cv2.rectangle(frame, (x1, y1), (x2, y2), border, 1)
 def divider(frame, x1, x2, y, color=C.DIVIDER):
@@ -124,7 +97,6 @@ def clinical_bar(frame, value, max_val, x, y, bar_w, bar_h=14, label="", unit=""
     if filled > 0: cv2.rectangle(frame, (x, y), (x + filled, y + bar_h), col, -1)
     cv2.rectangle(frame, (x, y), (x + bar_w, y + bar_h), C.BAR_BORDER, 1)
     txt(frame, f"{value:.1f}{unit}", x + bar_w + 6, y + bar_h - 1, C.TEXT_MED, scale=0.42)
-    return y + bar_h
 def status_chip(frame, text, x, y, w_chip, level="ok"):
     h_chip = 22
     bg  = {"ok": C.BG_STATUS_OK, "warn": C.BG_STATUS_WARN, "crit": C.BG_STATUS_CRIT}[level]
@@ -142,10 +114,6 @@ def draw_header(canvas, W, mode_label, exercise_label=""):
     badge = mode_label + (f"  |  {exercise_label}" if exercise_label else "")
     ts = cv2.getTextSize(badge, FONT, 0.58, 2)[0]
     txt(canvas, badge, (W - ts[0]) // 2, 32, C.TEXT_ACCENT, scale=0.58, thick=2)
-    clock_str = time.strftime("%H:%M:%S")
-    ts2 = cv2.getTextSize(clock_str, FONT, 0.50, 1)[0]
-    txt(canvas, clock_str, W - ts2[0] - 14, 22, C.TEXT_MED, scale=0.50)
-    txt(canvas, "LIVE", W - 44, 42, C.CRIT, scale=0.38, thick=1)
 def draw_bottom_bar(canvas, W, H, status_text, status_level, keys_hint):
     BAR_H = 48
     y0 = H - BAR_H
@@ -154,7 +122,6 @@ def draw_bottom_bar(canvas, W, H, status_text, status_level, keys_hint):
     cv2.rectangle(canvas, (0, y0), (W, H), bg, -1)
     cv2.line(canvas, (0, y0), (W, y0), C.PANEL_BORDER, 1)
     txt(canvas, status_text, 20, y0 + 30, col, scale=0.75, thick=2)
-    txt(canvas, keys_hint, W - 340, y0 + 30, C.TEXT_MED, scale=0.38, font=FONT_MONO)
 def draw_cognitive_panel(canvas, px, py, pw, ear, blinks_per_min, fatigue_idx, head_status, head_level):
     panel(canvas, px, py, px + pw, py + 230)
     txt(canvas, "COGNITIVE MODE", px + 12, py + 20, C.TEXT_ACCENT, scale=0.52, thick=2)
@@ -171,16 +138,12 @@ def draw_cognitive_panel(canvas, px, py, pw, ear, blinks_per_min, fatigue_idx, h
     divider(canvas, px + 12, px + pw - 12, py + 144)
     txt(canvas, "Head Position", px + 12, py + 166, C.TEXT_MED, scale=0.42)
     status_chip(canvas, head_status, px + 12, py + 174, pw - 24, level=head_level)
-def draw_exercise_panel(canvas, px, py, pw, fi_pct, status_msgs, conditions_fired, ex_status, ex_level, exercise_type, calib_done, calib_reps_done):
+def draw_exercise_panel(canvas, px, py, pw, fi_pct, status_msgs, ex_status, ex_level, exercise_type):
     ph = max(280, 52 + 42 + (len(status_msgs) + 1) * 24 + 50)
     panel(canvas, px, py, px + pw, py + ph)
     txt(canvas, exercise_type + " MODE", px + 12, py + 20, C.TEXT_ACCENT, scale=0.52, thick=2)
     divider(canvas, px + 12, px + pw - 12, py + 28)
-    if not calib_done:
-        txt(canvas, "Calibrating...", px + 12, py + 58, C.WARN, scale=0.52, thick=1)
-        txt(canvas, f"Reps collected: {calib_reps_done} / {CALIB_REPS_NEEDED}", px + 12, py + 82, C.TEXT_MED, scale=0.44)
-        txt(canvas, "Perform normal reps to calibrate.", px + 12, py + 106, C.TEXT_MED, scale=0.40)
-        return
+    
     txt(canvas, "Fatigue Index", px + 12, py + 50, C.TEXT_MED, scale=0.42)
     txt(canvas, f"{fi_pct:.0f}%", px + pw - 56, py + 50, C.OK if fi_pct < 31 else C.WARN if fi_pct < 61 else C.CRIT, scale=0.55, thick=2)
     clinical_bar(canvas, fi_pct, 100.0, px + 12, py + 60, bar_w=pw - 54, bar_h=14, low_good=True)
@@ -190,7 +153,7 @@ def draw_exercise_panel(canvas, px, py, pw, fi_pct, status_msgs, conditions_fire
     row_y = py + 148
     if status_msgs:
         for msg in status_msgs:
-            is_alert = any(kw in msg for kw in ["Collapse", "Drop", "Reduced", "Unstable", "Incomplete", "Slowing", "Sag", "Pause", "Slow"])
+            is_alert = any(kw in msg for kw in ["Collapse", "Drop", "Reduced", "Unstable", "Incomplete", "Slowing", "Sag", "Pause", "Slow", "Raise", "Dropping"])
             status_chip(canvas, msg, px + 12, row_y, pw - 24, level="crit" if is_alert else "ok")
             row_y += 26
     else:
@@ -205,30 +168,13 @@ def draw_alert_banner(canvas, W, text, alpha=0.72):
     ts  = cv2.getTextSize(text, FONT, 0.85, 2)[0]
     txt(canvas, text, (W - ts[0]) // 2, 52 + 23 + ts[1] // 2, (255, 255, 255), scale=0.85, thick=2)
 
-# --- FRIEND'S LOGIC MATH ---
 def eye_aspect_ratio(pts):
     A = np.linalg.norm(np.array(pts[1]) - np.array(pts[5]))
     B = np.linalg.norm(np.array(pts[2]) - np.array(pts[4]))
     C_ = np.linalg.norm(np.array(pts[0]) - np.array(pts[3]))
     return (A + B) / (2.0 * C_)
-def calc_angle(a, b, c):
-    a, b, c = np.array(a, dtype=float), np.array(b, dtype=float), np.array(c, dtype=float)
-    ang = abs((np.arctan2(c[1]-b[1], c[0]-b[0]) - np.arctan2(a[1]-b[1], a[0]-b[0])) * 180.0 / np.pi)
-    return 360.0 - ang if ang > 180.0 else ang
-def avg_knee_angle(lm, w, h):
-    LH = [lm[23].x*w, lm[23].y*h]; LK = [lm[25].x*w, lm[25].y*h]; LA = [lm[27].x*w, lm[27].y*h]
-    RH = [lm[24].x*w, lm[24].y*h]; RK = [lm[26].x*w, lm[26].y*h]; RA = [lm[28].x*w, lm[28].y*h]
-    return (calc_angle(LH,LK,LA) + calc_angle(RH,RK,RA)) / 2.0
-def hip_mid_y(lm, w, h): return (lm[23].y*h + lm[24].y*h) / 2.0
-def hip_mid_x(lm, w, h): return (lm[23].x*w + lm[24].x*w) / 2.0
-def body_avg_velocity(lm, w, h, prev_snap):
-    if prev_snap is None: return 0.0
-    idxs = [11, 12, 23, 24, 25, 26]
-    return float(np.mean([np.hypot(lm[i].x*w - prev_snap[i][0], lm[i].y*h - prev_snap[i][1]) for i in idxs]))
-def snapshot(lm, w, h): return {i: (lm[i].x*w, lm[i].y*h) for i in [11, 12, 23, 24, 25, 26]}
-def visibility_ok(lm): return all(lm[i].visibility > 0.45 for i in [11,12,23,24,25,26,27,28])
 
-# --- DB ROUTES (Unchanged) ---
+# --- DB ROUTES ---
 def save_session(user_id, exercise, reps, duration, fatigue):
     try:
         conn = mysql_helper.get_mysql_connection()
@@ -242,10 +188,10 @@ def save_session(user_id, exercise, reps, duration, fatigue):
 
 @socketio.on('end_workout')
 def handle_end_workout(data):
-    global active_exercise, start_time
+    global exercise_state, active_exercise, start_time
     user_id = data.get('user_id')
-    reps = data.get('reps', 0)
-    fatigue = data.get('fatigue', 0.0)
+    reps = data.get('reps', exercise_state.get('reps', 0))
+    fatigue = data.get('fatigue', exercise_state.get('fatigue_index', 0.0))
     duration = int(time.time() - start_time)
     save_session(user_id, active_exercise, reps, duration, fatigue)
     emit('workout_saved', {'success': True})
@@ -327,7 +273,7 @@ def api_dashboard_data():
 @login_required
 def api_ai_day_analysis():
     try:
-        from datetime import datetime, timedelta
+        from datetime import datetime
         conn = mysql_helper.get_mysql_connection()
         cursor = conn.cursor(dictionary=True)
         today = datetime.now().date()
@@ -336,12 +282,7 @@ def api_ai_day_analysis():
         if not sessions:
             return jsonify({'analysis': 'No sessions recorded today. Start your first session to get AI feedback!'}), 200
         sessions_text = '\n'.join([f"- {s['exercise_name']}: {s['duration']}s, {s['reps']} reps, Fatigue: {s['fatigue']}" for s in sessions])
-        prompt = f"""Analyze this user's workout session for today and provide motivational, constructive feedback. Keep it concise (2-3 sentences).
-
-Today's Sessions:
-{sessions_text}
-
-Provide insights on their performance, energy levels (fatigue), and suggestions for improvement."""
+        prompt = f"Analyze this user's workout session for today and provide motivational, constructive feedback. Keep it concise (2-3 sentences).\n\nToday's Sessions:\n{sessions_text}\n\nProvide insights on their performance, energy levels (fatigue), and suggestions for improvement."
         response = client.chat.completions.create(model="llama-3.1-8b-instant", messages=[{"role": "user", "content": prompt}], max_tokens=300)
         analysis = response.choices[0].message.content
         return jsonify({'analysis': analysis}), 200
@@ -358,9 +299,21 @@ def vr_session():
 
 @socketio.on('start_workout')
 def handle_start_workout(data):
-    global is_workout_active, workout_mode, target_reps, start_time, target_duration
+    global session_status, workout_mode, target_reps, start_time, target_duration, exercise_state
+    
     workout_mode = data.get('mode', 'reps')
-    is_workout_active = True
+    
+    # HARD RESET MEMORY
+    exercise_state.clear()
+    exercise_state['reps'] = 0
+    exercise_state['stage'] = 'up'
+    exercise_state['lowest_angle'] = 180
+    exercise_state['worst_posture'] = 180
+    exercise_state['fatigue_index'] = 0.0
+    exercise_state['fatigue_alerts'] = []
+    
+    session_status = 'active'
+    
     if workout_mode == 'time':
         target_duration = int(data.get('target', 5)) * 60 
         start_time = time.time()
@@ -369,9 +322,9 @@ def handle_start_workout(data):
         target_reps = int(data.get('target', 10))
         emit('update_vr', {'status': 'Get Ready!', 'score_text': f'Reps: 0 / {target_reps}'})
 
-# --- UNIFIED VISION ENGINE (Friend's detect_realtime + VR Socket) ---
+# --- UNIFIED VISION ENGINE ---
 def process_webcam():
-    global active_exercise, is_workout_active, workout_mode, target_reps, start_time, target_duration
+    global active_exercise, session_status, workout_mode, target_reps, start_time, target_duration, exercise_state
     
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
@@ -380,37 +333,10 @@ def process_webcam():
     WIN_NAME = "VR Health Monitor - Remote Dashboard"
     cv2.namedWindow(WIN_NAME, cv2.WINDOW_NORMAL)
 
-    # State Variables
     last_active_exercise = None
-    calib_done = False
-    calib_roms = []
-    calib_up_velocities = []
-    calib_hip_x_std = None
-    calib_standing_hip_y = None
-    calib_transition_times = []
-    calib_avg_velocity = None
-    baseline_rom = None
-    baseline_up_velocity = None
-    prev_hip_y = None
-    prev_knee_angle = None
-    prev_knee_angle_time = None
-    velocity_history = deque(maxlen=VEL_WINDOW)
-    hip_x_history = deque(maxlen=HIP_X_HISTORY_WINDOW)
-    upward_vel_history = deque(maxlen=10)
-    knee_angle_buffer = deque(maxlen=10)
-    knee_time_buffer = deque(maxlen=10)
-    rep_stage = "UP"
-    rep_min_angle = 180.0
-    rep_count = 0
-    consecutive_incomplete = 0
-    surya_last_transition_time = time.time()
-    surya_pause_start = None
-    surya_transition_count = 0
-    fatigue_index_ex = 0.0
-    fatigue_index_display = 0.0
     alert_text = ""
     alert_until = 0.0
-    prev_lm_snap = None
+    smoothed_fatigue = 0.0
     
     closed_start_time = None
     blink_start = None
@@ -437,22 +363,19 @@ def process_webcam():
         face_results = face_mesh.process(rgb)
         pose_results = pose.process(rgb)
 
-        # Decide Mode based on VR Menu
         if active_exercise in ["squat", "pushup", "cardio"]:
             mode = "EXERCISE"
-            sys_ex_type = "SQUATS" if active_exercise == "squat" else "SURYA" if active_exercise == "cardio" else "PUSHUPS"
+            sys_ex_type = "SQUATS" if active_exercise == "squat" else "SURYA NAMASKAR" if active_exercise == "cardio" else "PUSHUPS"
         else:
             mode = "COGNITIVE"
-            sys_ex_type = "YOGA"
+            sys_ex_type = "YOGA / MEDITATION"
             
-        # Reset trackers if VR user changed exercise
         if active_exercise != last_active_exercise:
-            calib_done = False
-            calib_roms.clear(); calib_up_velocities.clear(); calib_transition_times.clear()
-            velocity_history.clear(); hip_x_history.clear(); upward_vel_history.clear()
-            knee_angle_buffer.clear(); knee_time_buffer.clear()
-            rep_count = 0; fatigue_index_ex = 0.0; fatigue_index_display = 0.0; fatigue_index_cog = 0.0
+            exercise_state.clear()
             last_active_exercise = active_exercise
+            fatigue_index_cog = 0.0
+            smoothed_fatigue = 0.0
+            blink_timestamps.clear()
 
         head_drop = False
         ex_main_status = "Waiting for VR..."
@@ -462,158 +385,56 @@ def process_webcam():
         vr_status_msg = "Tracking..."
         vr_fatigue_alert = ""
 
-        # --- EXERCISE MODE (Pose Tracking) ---
-        if mode == "EXERCISE" and pose_results.pose_landmarks and is_workout_active:
-            lm = pose_results.pose_landmarks.landmark
-            mp_drawing.draw_landmarks(cam_resized, pose_results.pose_landmarks, mp_pose.POSE_CONNECTIONS, POSE_DRAW_SPEC, POSE_CONN_SPEC)
+        # --- EXERCISE MODE ---
+        if mode == "EXERCISE":
+            if pose_results.pose_landmarks:
+                mp_drawing.draw_landmarks(cam_resized, pose_results.pose_landmarks, mp_pose.POSE_CONNECTIONS, POSE_DRAW_SPEC, POSE_CONN_SPEC)
             
-            if not visibility_ok(lm) and sys_ex_type != "PUSHUPS":
-                txt(cam_resized, "Move Back: Full Body Required", 20, CAM_H//2, C.CRIT, scale=0.70, thick=2)
-                vr_status_msg = "Move back to fit camera!"
-            else:
-                # 1. Calibration Phase (Squats/Surya)
-                if not calib_done and sys_ex_type in ["SQUATS", "SURYA"]:
-                    knee_ang = avg_knee_angle(lm, fw, fh)
-                    hip_y_ = hip_mid_y(lm, fw, fh)
-                    hip_x_history.append(hip_mid_x(lm, fw, fh))
-
-                    if prev_hip_y is not None:
-                        velocity_history.append(abs(hip_y_ - prev_hip_y))
-                        if hip_y_ < prev_hip_y and rep_stage == "DOWN":
-                            upward_vel_history.append(abs(hip_y_ - prev_hip_y))
-
-                    if knee_ang < 140:
-                        rep_stage = "DOWN"
-                        rep_min_angle = min(rep_min_angle, knee_ang)
-                    elif knee_ang >= 155 and rep_stage == "DOWN":
-                        calib_roms.append(rep_min_angle)
-                        if upward_vel_history: calib_up_velocities.append(float(np.mean(upward_vel_history)))
-                        rep_min_angle = 180.0
-                        rep_stage = "UP"
-                        upward_vel_history.clear()
-                    
-                    prev_hip_y = hip_y_
-                    
-                    if len(calib_roms) >= CALIB_REPS_NEEDED:
-                        calib_done = True
-                        baseline_up_velocity = float(np.mean(calib_up_velocities)) if calib_up_velocities else 5.0
-                        calib_hip_x_std = float(np.std(hip_x_history)) if len(hip_x_history)>5 else 5.0
-
-                    draw_exercise_panel(canvas, PNL_X, PNL_Y, PANEL_W, 0.0, [], [], "Calibrating", "warn", sys_ex_type, False, len(calib_roms))
-                    bottom_status = f"Calibrating: Do {CALIB_REPS_NEEDED} reps"
-                    vr_status_msg = f"Calibrating: Rep {len(calib_roms)}/{CALIB_REPS_NEEDED}"
+            if pose_results.pose_landmarks and session_status == 'active':
+                lm = pose_results.pose_landmarks.landmark
+                exercise_state, play_audio = exercise_logic.detect_exercise(active_exercise, lm, exercise_state)
                 
-                # 2. Fatigue Tracking Phase
+                rep_count   = exercise_state.get('reps', 0)
+                status_msgs = exercise_state.get('fatigue_alerts', [])
+                raw_f_index = exercise_state.get('fatigue_index', 0.0)
+                vr_status_msg = exercise_state.get('status', 'Tracking...')
+                
+                # Apply smoothing to prevent jumping
+                smoothed_fatigue = (0.1 * raw_f_index) + (0.9 * smoothed_fatigue)
+
+                if len(status_msgs) >= 2 or smoothed_fatigue > 75:
+                    ex_main_status = "FATIGUE DETECTED"
+                    ex_main_level = "crit"
+                    alert_text = "⚠ FATIGUE DETECTED"
+                    alert_until = current_time + 2.5
+                    bottom_status = "FATIGUE DETECTED — STOP!"
+                    bottom_level = "crit"
+                    vr_fatigue_alert = "⚠ " + (status_msgs[-1] if status_msgs else "Fatigue")
+                elif smoothed_fatigue > 60:
+                    ex_main_status = "Moderate Fatigue"
+                    ex_main_level = "crit"
+                    bottom_status = "Moderate Fatigue"
+                    bottom_level = "warn"
+                elif smoothed_fatigue > 30:
+                    ex_main_status = "Mild Fatigue"
+                    ex_main_level = "warn"
+                    bottom_status = "Mild Fatigue"
+                    bottom_level = "warn"
                 else:
-                    conditions_fired = []
-                    status_msgs = []
-                    
-                    if sys_ex_type == "SQUATS":
-                        knee_ang = avg_knee_angle(lm, fw, fh)
-                        hip_y_ = hip_mid_y(lm, fw, fh)
-                        knee_angle_buffer.append(knee_ang); knee_time_buffer.append(current_time); hip_x_history.append(hip_mid_x(lm, fw, fh))
-                        
-                        hip_delta = hip_y_ - prev_hip_y if prev_hip_y is not None else 0.0
-                        if prev_hip_y is not None:
-                            velocity_history.append(abs(hip_delta))
-                            if hip_delta < 0 and rep_stage == "DOWN": upward_vel_history.append(abs(hip_delta))
+                    ex_main_status = "Exercising Normally"
+                    ex_main_level = "ok"
+                    bottom_status = "Tracking OK"
+                    bottom_level = "ok"
 
-                        if knee_ang < 140:
-                            rep_stage = "DOWN"
-                            vr_status_msg = "Hold... drive up!"
-                        elif knee_ang >= 155 and rep_stage == "DOWN":
-                            rep_count += 1
-                            rep_stage = "UP"
-                            vr_status_msg = "Perfect Squat!"
-                            if is_workout_active: socketio.emit('play_audio', {'file': 'good'})
-                        elif rep_stage == "UP": vr_status_msg = "Control descent..."
+                draw_exercise_panel(canvas, PNL_X, PNL_Y, PANEL_W, smoothed_fatigue, status_msgs, ex_main_status, ex_main_level, sys_ex_type)
+                cv2.putText(cam_resized, f"REPS: {rep_count}", (30, 60), cv2.FONT_HERSHEY_DUPLEX, 1.5, (0, 140, 255), 3, cv2.LINE_AA)
+            
+            else:
+                draw_exercise_panel(canvas, PNL_X, PNL_Y, PANEL_W, 0.0, [], "Waiting for VR Start", "warn", sys_ex_type)
+                cv2.putText(cam_resized, "REPS: 0", (30, 60), cv2.FONT_HERSHEY_DUPLEX, 1.5, (0, 140, 255), 3, cv2.LINE_AA)
+                cv2.putText(cam_resized, "WAITING TO START IN VR...", (30, 110), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 1, cv2.LINE_AA)
 
-                        if len(knee_angle_buffer)>=2:
-                            for i in range(len(knee_time_buffer)):
-                                if (current_time - knee_time_buffer[i]) <= SQUAT_KNEE_COLLAPSE_SECS and (knee_angle_buffer[i] - knee_ang) > SQUAT_KNEE_COLLAPSE_DEG:
-                                    conditions_fired.append("knee_collapse")
-                                    status_msgs.append("Knee Collapse"); break
-                        
-                        if baseline_up_velocity and rep_stage == "DOWN" and len(upward_vel_history) >= 3:
-                            if float(np.mean(list(upward_vel_history)[-3:])) < baseline_up_velocity * SQUAT_VEL_DECAY_RATIO:
-                                conditions_fired.append("upward_vel_reduced")
-                                status_msgs.append("Speed Reduced")
-                                
-                        if calib_hip_x_std and len(hip_x_history) >= HIP_X_HISTORY_WINDOW and float(np.std(hip_x_history)) > calib_hip_x_std * SQUAT_BALANCE_MULTIPLIER:
-                            conditions_fired.append("balance_unstable")
-                            status_msgs.append("Balance Unstable")
-
-                        prev_hip_y = hip_y_
-                        
-                    elif sys_ex_type == "PUSHUPS":
-                        # Basic pushup wrapper
-                        ley = lm[13].y; rey = lm[14].y
-                        lwy = lm[15].y; rwy = lm[16].y
-                        if ley > lwy and rey > rwy:
-                            rep_stage = "DOWN"
-                            vr_status_msg = "Push Up!"
-                        elif rep_stage == "DOWN":
-                            rep_count += 1
-                            rep_stage = "UP"
-                            vr_status_msg = "Great pushup!"
-                            if is_workout_active: socketio.emit('play_audio', {'file': 'good'})
-                        elif rep_stage == "UP": vr_status_msg = "Go down..."
-                        calib_done = True
-                        
-                    elif sys_ex_type == "SURYA":
-                        knee_ang = avg_knee_angle(lm, fw, fh)
-                        vel = body_avg_velocity(lm, fw, fh, prev_lm_snap)
-                        prev_lm_snap = snapshot(lm, fw, fh)
-                        
-                        avg_sh_y = (lm[11].y*fh + lm[12].y*fh)/2.0
-                        avg_wr_y = (lm[15].y*fh + lm[16].y*fh)/2.0
-                        
-                        if avg_wr_y < avg_sh_y and knee_ang > 150:
-                            if rep_stage == 'DOWN':
-                                gap = current_time - surya_last_transition_time
-                                if gap > 0.5: calib_transition_times.append(gap)
-                                rep_count += 1
-                                surya_last_transition_time = current_time
-                                vr_status_msg = "Cycle complete!"
-                                if is_workout_active: socketio.emit('play_audio', {'file': 'good'})
-                            rep_stage = 'UP'
-                        elif avg_wr_y > avg_sh_y:
-                            rep_stage = 'DOWN'
-                            vr_status_msg = "Flow through pose..."
-
-                        if vel < SURYA_PAUSE_VELOCITY:
-                            if surya_pause_start is None: surya_pause_start = current_time
-                            elif (current_time - surya_pause_start) > SURYA_PAUSE_SECS:
-                                conditions_fired.append("long_pause")
-                                status_msgs.append("Abnormal Pause")
-                        else: surya_pause_start = None
-
-                    # Update Fatigue Score
-                    n_fired = len(conditions_fired)
-                    if n_fired >= MIN_CONDITIONS_FOR_FATIGUE: fatigue_index_ex = min(100.0, fatigue_index_ex + FI_INCREMENT_PER_CONDITION * n_fired)
-                    else: fatigue_index_ex = max(0.0, fatigue_index_ex - FI_DECAY_PER_FRAME)
-                    fatigue_index_display = (FI_SMOOTHING_ALPHA * fatigue_index_ex + (1.0 - FI_SMOOTHING_ALPHA) * fatigue_index_display)
-
-                    if n_fired >= MIN_CONDITIONS_FOR_FATIGUE:
-                        ex_main_status = "FATIGUE DETECTED"
-                        ex_main_level = "crit"
-                        alert_text = "⚠ FATIGUE DETECTED"
-                        alert_until = current_time + 2.5
-                        bottom_status = "FATIGUE DETECTED"
-                        bottom_level = "crit"
-                        vr_fatigue_alert = "⚠ " + status_msgs[-1]
-                    elif fatigue_index_display > 60:
-                        ex_main_status = "Moderate Fatigue"
-                        ex_main_level = "crit"
-                        bottom_status = "Moderate Fatigue"
-                    else:
-                        ex_main_status = "Exercising Normally"
-                        ex_main_level = "ok"
-                        bottom_status = "Tracking OK"
-
-                    draw_exercise_panel(canvas, PNL_X, PNL_Y, PANEL_W, fatigue_index_display, status_msgs, conditions_fired, ex_main_status, ex_main_level, sys_ex_type, True, CALIB_REPS_NEEDED)
-
-        # --- COGNITIVE MODE (Face Mesh Tracking) ---
+        # --- COGNITIVE MODE ---
         if face_results.multi_face_landmarks:
             for fl in face_results.multi_face_landmarks:
                 nose_y = int(fl.landmark[NOSE_INDEX].y * fh)
@@ -646,9 +467,12 @@ def process_webcam():
                     else: fatigue_index_cog = max(0.0, fatigue_index_cog - 0.01)
 
                     if fatigue_index_cog >= 3:
-                        bottom_status = "HIGH FATIGUE!"
+                        bottom_status = "HIGH FATIGUE ALERT!"
                         bottom_level = "crit"
                         vr_fatigue_alert = "⚠ Wake Up!"
+                    elif fatigue_index_cog >= 1:
+                        bottom_status = "MODERATE FATIGUE"
+                        bottom_level = "warn"
                     else:
                         bottom_status = "RELAXED"
                         bottom_level = "ok"
@@ -661,42 +485,77 @@ def process_webcam():
         draw_bottom_bar(canvas, CW, CH, bottom_status, bottom_level, "VR Link Active")
         cv2.rectangle(canvas, (CAM_X-1, CAM_Y-1), (CAM_X+CAM_W, CAM_Y+CAM_H), C.PANEL_BORDER, 1)
 
-        # --- VR SOCKET UPDATES ---
-        if is_workout_active:
+        # --- FIX: THE 3-STATE VR SOCKET LOGIC ---
+        if session_status == 'active':
             score_text = ""
             if workout_mode == 'reps':
-                score_text = f"Reps: {rep_count} / {target_reps}"
-                if rep_count >= target_reps:
-                    is_workout_active = False
-                    vr_status_msg = "Goal Reached!"
+                current_reps = exercise_state.get('reps', 0)
+                score_text = f"Reps: {current_reps} / {target_reps}"
+                
+                if current_reps >= target_reps:
+                    session_status = 'completed'
+                    vr_status_msg = "Goal Reached! Exiting..."
                     socketio.emit('play_audio', {'file': 'good'})
             elif workout_mode == 'time':
                 elapsed = time.time() - start_time
                 remaining = int(max(0, target_duration - elapsed))
                 mins, secs = divmod(remaining, 60)
                 score_text = f"Time Left: {mins}:{secs:02d}"
+                
                 if remaining <= 0:
-                    is_workout_active = False
+                    session_status = 'completed'
                     vr_status_msg = "Meditation Complete!"
                     socketio.emit('play_audio', {'file': 'good'})
 
             socketio.emit('update_vr', {
                 'score_text': score_text,
                 'status': vr_status_msg,
-                'fatigue_score': fatigue_index_display if mode=="EXERCISE" else (fatigue_index_cog/5.0)*100, 
+                'fatigue_score': smoothed_fatigue if mode=="EXERCISE" else (fatigue_index_cog/5.0)*100, 
                 'fatigue_text': vr_fatigue_alert,
-                'reps': rep_count
+                'reps': exercise_state.get('reps', 0)
             })
-        else:
-            if not is_workout_active and workout_mode == 'reps' and rep_count >= target_reps and target_reps > 0:
-                socketio.emit('update_vr', {'status': 'Session Done!', 'score_text': f"Reps: {target_reps}/{target_reps}"})
+
+        elif session_status == 'completed':
+            # Lock the UI into the "Session Done" state until VR redirects
+            score_text = f"Reps: {target_reps}/{target_reps}" if workout_mode == 'reps' else "Time Left: 0:00"
+            socketio.emit('update_vr', {
+                'status': 'Session Done!', 
+                'score_text': score_text,
+                'fatigue_score': 0.0,
+                'fatigue_text': '',
+                'reps': target_reps if workout_mode == 'reps' else 0
+            })
+            
+        else: # 'idle'
+            socketio.emit('update_vr', {
+                'status': 'Click Start', 
+                'score_text': 'Ready',
+                'fatigue_score': 0.0,
+                'fatigue_text': '',
+                'reps': 0
+            })
         
-        # DISPLAY FRIEND'S CLINICAL DASHBOARD
         cv2.imshow(WIN_NAME, canvas) 
         if cv2.waitKey(1) & 0xFF == ord('q'): break
 
     cap.release()
     cv2.destroyAllWindows()
+
+@socketio.on('send_chat')
+def handle_chat(data):
+    user_text = data['message']
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile", 
+            messages=[
+                {"role": "system", "content": "You are PhysioVR Coach. Keep answers under 50 words."},
+                {"role": "user", "content": user_text}
+            ]
+        )
+        ai_reply = response.choices[0].message.content
+    except Exception as e:
+        ai_reply = "I'm having trouble connecting to the cloud. Please check your internet."
+    emit('receive_chat', {'role': 'ai', 'text': ai_reply})
 
 if __name__ == '__main__':
     t = Thread(target=process_webcam)
